@@ -24,6 +24,36 @@ The implementation program is organized into seven epics:
 6. Integrations, jobs, and observability
 7. Documentation tutorial and demo rewrite
 
+## Current Status Snapshot
+
+This program is active, but not complete.
+
+Current status by epic:
+
+- Epic 1: partially implemented
+- Epic 2: partially implemented
+- Epic 3: partially implemented
+- Epic 4: not yet implemented to the required end-to-end level
+- Epic 5: partially implemented
+- Epic 6: partially implemented
+- Epic 7: started but materially incomplete
+
+The detailed gap list is tracked in
+[08-gap-audit-and-realignment.md](./08-gap-audit-and-realignment.md).
+The dependency-ordered execution backlog, including chapter-level status and definition of done, is tracked in
+[09-detailed-execution-plan.md](./09-detailed-execution-plan.md).
+
+## Execution Rule
+
+Do not mark an epic complete merely because some supporting APIs or docs exist.
+
+An epic is complete only when:
+
+- the underlying capability exists in code
+- the demo app uses it
+- the getting-started tutorial teaches it concretely
+- the public checkpoint for that chapter or slice is runnable
+
 ## Epic 1: CMS Editorial Foundation
 
 ### Purpose
@@ -282,10 +312,11 @@ Turn the public onboarding story into a realistic product-building tutorial and 
 
 ### Scope
 
-- getting-started restructuring
-- tutorial chapters
-- demo application evolution
-- reference-doc cross-linking
+- restructure `Getting Started` into the full twenty-chapter tutorial required by document 06
+- update public docs to match implemented platform seams
+- evolve Shoppr into the tutorial-shaped demo app rather than leaving the tutorial on a generic
+  placeholder workspace
+- keep each tutorial chapter aligned to real implemented capability rather than aspirational prose
 
 ### Dependencies
 
@@ -293,21 +324,23 @@ Turn the public onboarding story into a realistic product-building tutorial and 
 
 ### Task Slices
 
-1. Restructure `Getting Started` into a tutorial sequence
-2. Build the early tutorial chapters:
-   - project creation
-   - runtime shape
-   - theme
-   - sites/locales
-3. Evolve the demo to exercise:
+1. Audit current `Getting Started` against requirement 06
+2. Expand the current early skeleton into the required twenty-chapter structure
+3. Rewrite early chapters so they explain ownership, file purpose, and runtime effect around full
+   code listings
+4. Add later chapters in lockstep with platform capability work
+5. Evolve the demo to exercise:
    - structured CMS
-   - dynamic blocks
-   - bookings/memberships/admin
+   - discovery
+   - accounts and memberships
+   - events, bookings, and passes
+   - admin operations
    - one reproducible integration
-4. Map every tutorial chapter back to stable reference docs
+6. Map every tutorial chapter back to stable reference docs
 
 ### Acceptance Criteria
 
+- all twenty tutorial chapters from requirement 06 exist
 - the public tutorial teaches the platform seams through a real build
 - the demo proves the platform can support the target product shape
 - reference docs remain lookup-oriented while the tutorial provides the narrative bridge

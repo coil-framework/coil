@@ -190,11 +190,64 @@ That set teaches the boundary you need:
 - shared block is reusable content
 - shared reference is how the page points at that reusable content
 
-It also lines up with the later CMS workflow:
+## What Each File Is Doing
 
-- page settings still live at the page level
-- ordered blocks become the editable page-builder surface
-- shared blocks become reusable editorial assets
+### `app.toml`
+
+This file now defines both the page schema and the block schema.
+
+The important new section is `[[block_types]]`.
+
+Each block type gives the editor a reusable block contract:
+
+- `hero` supports the main campaign banner content
+- `promo_grid` supports a smaller structured list section
+- `trust_strip` supports reusable reassurance content
+
+This file only defines what kinds of blocks can exist. It does not place any blocks on a page by
+itself.
+
+### `content/shared-blocks/delivery-promises.json`
+
+This file creates one reusable block instance that can be referenced from multiple pages.
+
+The important fields are:
+
+- `id`
+  The stable identifier other pages will reference.
+- `block_type`
+  The schema contract this shared block uses.
+- `fields`
+  The actual editorial values for that reusable block.
+
+This is how the CMS can store one shared editorial asset instead of copying the same footer-style
+content into every page record.
+
+### `content/pages/spring-sale.json`
+
+This file shows the page-builder shape on a real page.
+
+The important section is `blocks`.
+
+That ordered array now mixes two kinds of block records:
+
+- `kind = "instance"`
+  A page-local block owned only by this page.
+- `kind = "shared_reference"`
+  A pointer to a reusable shared block stored elsewhere.
+
+That is the core page-builder behavior. The page owns the order of the blocks, while some of the
+content can still be shared across many pages.
+
+## What Behavior This Enables
+
+Once these files line up:
+
+- the page becomes an ordered structured block list instead of one free-form body field
+- editors can reuse common content without duplicating it across every page
+- the runtime can resolve shared block references when composing the page
+- the CMS admin can later expose block reorder, replace, and shared-block editing workflows
+- page-level settings still remain separate from the block list
 
 ## Checkpoint
 

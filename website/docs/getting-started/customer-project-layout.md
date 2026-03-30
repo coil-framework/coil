@@ -2,14 +2,9 @@
 title: Customer Project Layout
 ---
 
-Coil’s preferred shape is a customer-owned Rust workspace that depends on Coil as upstream crates.
+This page shows the exact workspace shape the tutorial is using and what each file contributes.
 
-This page is for the moment when you want the exact project shape, not another abstract reminder
-that “the customer workspace matters.”
-
-## The Layout To Copy
-
-Use a workspace that looks like this:
+## The Workspace Shape
 
 ```text
 tutorial-app/
@@ -37,9 +32,10 @@ tutorial-app/
     tutorial-auth/
 ```
 
-## The Root Workspace File
+This split matters because the tutorial is teaching a customer-owned app, not a monolithic starter
+crate.
 
-`Cargo.toml` should look like a normal Rust workspace, not a framework-owned monorepo stub:
+## Root `Cargo.toml`
 
 ```toml
 [workspace]
@@ -60,12 +56,12 @@ coil-customer-sdk = "0.1"
 serde = { version = "1", features = ["derive"] }
 ```
 
-That one file already answers a key question: the customer project is the composition root, and
-Coil is an upstream dependency.
+This file does two things:
 
-## The Three Crates
+- it makes the three customer crates build together
+- it centralizes shared dependency versions
 
-### `crates/tutorial-app-bin/Cargo.toml`
+## `crates/tutorial-app-bin/Cargo.toml`
 
 ```toml
 [package]
@@ -77,7 +73,9 @@ edition.workspace = true
 tutorial-app-app = { path = "../tutorial-app-app" }
 ```
 
-### `crates/tutorial-app-app/Cargo.toml`
+This crate depends only on the app crate because it is just the process entrypoint.
+
+## `crates/tutorial-app-app/Cargo.toml`
 
 ```toml
 [package]
@@ -91,7 +89,9 @@ coil-config = "0.1"
 tutorial-app-backend = { path = "../tutorial-app-backend" }
 ```
 
-### `crates/tutorial-app-backend/Cargo.toml`
+This crate depends on Coil plus the customer backend because it composes the runtime.
+
+## `crates/tutorial-app-backend/Cargo.toml`
 
 ```toml
 [package]
@@ -103,11 +103,9 @@ edition.workspace = true
 coil-customer-sdk.workspace = true
 ```
 
-## The App-Root Files
+This crate depends only on the stable customer SDK because it should not need runtime internals.
 
-### `app.toml`
-
-This is the app contract:
+## `app.toml`
 
 ```toml
 name = "tutorial-app"
@@ -137,9 +135,15 @@ name = "cms"
 name = "commerce"
 ```
 
-### `platform.dev.toml`
+This file defines product structure:
 
-This is environment/runtime configuration:
+- product identity
+- public domains
+- locales
+- enabled official modules
+- theme and auth roots
+
+## `platform.dev.toml`
 
 ```toml
 [app]
@@ -162,9 +166,13 @@ mode = "local"
 local_root = ".coil/state"
 ```
 
-### `docker-compose.yml`
+This file defines how the app runs in development:
 
-This is the local dependency surface:
+- which port to bind
+- where database and cache backends live
+- where local state is stored
+
+## `docker-compose.yml`
 
 ```yaml
 services:
@@ -182,9 +190,9 @@ services:
       - "6379:6379"
 ```
 
-## The Full App Crate File
+This file starts the local services the platform config points at.
 
-The app crate is where the workspace and the app root meet:
+## `crates/tutorial-app-app/src/lib.rs`
 
 ```rust
 use coil_all::modules;
@@ -214,11 +222,14 @@ pub fn run_from_args(
 }
 ```
 
-If your runtime composition is hard to find, the project shape is drifting.
+This file enables the app’s runtime behavior:
 
-## The Full Binary File
+- loads config during validation
+- links the customer backend
+- registers official modules
+- serves through the app-owned composition root
 
-The binary should stay thin:
+## `crates/tutorial-app-bin/src/main.rs`
 
 ```rust
 use std::process::ExitCode;
@@ -234,11 +245,9 @@ fn main() -> ExitCode {
 }
 ```
 
-The binary owns lifecycle entry. The app crate owns composition.
+This file makes the app runnable as a normal binary.
 
-## The Full Backend File
-
-The backend crate should be present even before it contains much logic:
+## `crates/tutorial-app-backend/src/lib.rs`
 
 ```rust
 use coil_customer_sdk::{CustomerBackendPlugin, CustomerHookRegistry};
@@ -255,24 +264,11 @@ impl CustomerBackendPlugin for TutorialAppPlugin {
 }
 ```
 
+This file is the starting point for customer-owned backend rules.
+
 ## Checkpoint
 
-At this point a reviewer should be able to copy these files and produce the same workspace shape:
-
-```text
-Cargo.toml
-app.toml
-platform.dev.toml
-docker-compose.yml
-crates/tutorial-app-bin/Cargo.toml
-crates/tutorial-app-bin/src/main.rs
-crates/tutorial-app-app/Cargo.toml
-crates/tutorial-app-app/src/lib.rs
-crates/tutorial-app-backend/Cargo.toml
-crates/tutorial-app-backend/src/lib.rs
-```
-
-They should also be able to run the workspace through the customer binary:
+Run:
 
 ```bash
 docker compose up -d
@@ -280,9 +276,5 @@ cargo run -p tutorial-app-bin -- validate
 cargo run -p tutorial-app-bin -- serve
 ```
 
-## What To Read Next
-
-- [Linked Rust backends](linked-rust-backends.md)
-- [Customer-root workspace](../core-concepts/customer-root-workspace.md)
-- [Runtime and module composition](../core-concepts/runtime-and-module-composition.md)
-- [Build and deploy](../operations/build-and-deploy.md)
+At this point you should be able to explain which file owns product structure, runtime config,
+composition, process entry, and customer backend behavior.

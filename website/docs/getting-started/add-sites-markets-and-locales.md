@@ -2,11 +2,23 @@
 title: Add Sites, Markets, and Locales
 ---
 
-This chapter makes the tutorial app visibly multi-site and locale-aware.
+This chapter moves the app from one host and one locale to a site-first configuration with a
+storefront shell that exposes site and locale switching.
+
+## Purpose
+
+At the end of this chapter:
+
+- the app has two sites
+- each site has its own canonical host
+- each site has its own locale contract
+- locale-prefixed routes are enabled
+- the storefront shell exposes site and locale switching
+- the storefront bundle owns the panel interaction for those switches
 
 ## Replace `app.toml`
 
-At this point, replace the earlier single-site manifest with a concrete site-first file:
+`app.toml` now becomes site-first:
 
 ```toml
 name = "tutorial-app"
@@ -35,9 +47,18 @@ default_locale = "fr-FR"
 supported_locales = ["fr-FR"]
 ```
 
+What each section does:
+
+- `[i18n]`
+  Declares the full locale set the app supports.
+- first `[[sites]]`
+  Creates the UK site and limits it to `en-GB`.
+- second `[[sites]]`
+  Creates the France site and limits it to `fr-FR`.
+
 ## Replace `platform.dev.toml`
 
-The runtime config must match the same site model:
+The local runtime config needs matching site definitions with local hosts:
 
 ```toml
 [app]
@@ -69,9 +90,16 @@ default_locale = "fr-FR"
 supported_locales = ["fr-FR"]
 ```
 
+What each section does:
+
+- `[i18n].localized_routes = true`
+  Turns on locale-prefixed URLs.
+- `[[sites]]`
+  Maps each site id to a local host and locale set.
+
 ## Replace `templates/layouts/base.html`
 
-Now update the shell so the site and locale split is visible in the UI:
+Update the storefront shell so users can see and use the site and locale model.
 
 ```html
 <!doctype html>
@@ -79,30 +107,52 @@ Now update the shell so the site and locale split is visible in the UI:
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page.title}">Tutorial App</title>
+    <title coil:text="${page_title}">Tutorial App</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body>
+  <body class="tutorial-shell">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="brand" href="/" coil:attr="href=${links.home}">Tutorial App</a>
-      <nav aria-label="Primary">
-        <a href="/" coil:attr="href=${links.home}">Home</a>
-        <a href="/shop" coil:attr="href=${links.catalog}">Shop</a>
-        <a href="/account" coil:attr="href=${links.account}">Account</a>
-      </nav>
-      <nav aria-label="Sites and locales" class="utility-nav">
-        <a
-          coil:each="switch : ${links.site_switches}"
-          coil:attr="href=${switch.href}"
-          coil:text="${switch.label}"
-        >UK</a>
-        <a
-          coil:each="switch : ${links.locale_switches}"
-          coil:attr="href=${switch.href}"
-          coil:text="${switch.label}"
-        >English</a>
-      </nav>
+      <div class="site-header__main">
+        <a class="brand" href="/" coil:attr="href=${links.home}">
+          <span class="brand__mark">T</span>
+          <span class="brand__wordmark">Tutorial App</span>
+        </a>
+        <nav aria-label="Primary">
+          <a href="/" coil:attr="href=${links.home}">Home</a>
+          <a href="/shop" coil:attr="href=${links.catalog}">Shop</a>
+          <a href="/account" coil:attr="href=${links.account}">Account</a>
+        </nav>
+        <div class="utility-nav">
+          <button type="button" class="button button--secondary" data-panel-toggle="market-panel" aria-expanded="false">
+            Markets
+          </button>
+          <button type="button" class="button button--secondary" data-panel-toggle="locale-panel" aria-expanded="false">
+            Language
+          </button>
+        </div>
+      </div>
+      <div class="site-header__panels">
+        <div class="switcher-panel" id="market-panel" hidden="hidden">
+          <p class="eyebrow">Market</p>
+          <ul>
+            <li coil:each="item : ${links.site_switches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Tutorial UK</a>
+              <span coil:if="${item.active}">Current</span>
+            </li>
+          </ul>
+        </div>
+        <div class="switcher-panel" id="locale-panel" hidden="hidden">
+          <p class="eyebrow">Language</p>
+          <ul>
+            <li coil:each="item : ${links.locale_switches}">
+              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
+              <span coil:if="${item.active}">Current</span>
+            </li>
+          </ul>
+        </div>
+      </div>
     </header>
     <main id="main" class="site-main">
       <coil:block coil:insert="${content}">
@@ -116,19 +166,102 @@ Now update the shell so the site and locale split is visible in the UI:
 </html>
 ```
 
-At this checkpoint three files need to agree with each other:
+What each section does:
 
-- `app.toml` defines the public site model
-- `platform.dev.toml` defines the local host map
-- `templates/layouts/base.html` exposes site and locale switching in the shell
+- the head still loads the storefront bundle, not a new site-specific bundle
+- `${links.site_switches}`
+  Renders runtime-generated site links
+- `${links.locale_switches}`
+  Renders runtime-generated locale links
+- `data-panel-toggle`
+  Gives `site.ts` a stable controller seam for switcher-panel behavior
 
-## Checkpoint
+## Update `theme/frontend/site.ts`
 
-Run the app and verify:
+The storefront controller now owns panel toggles for site and locale switching.
 
-- `http://uk.127.0.0.1.nip.io:8080/en-GB/` works
-- `http://fr.127.0.0.1.nip.io:8080/fr-FR/` works
-- the shell visibly acknowledges site and locale switching
+```ts
+import "@hotwired/turbo";
+import { Application, Controller } from "@hotwired/stimulus";
+
+class SiteInteractiveController extends Controller<HTMLElement> {
+  connect() {
+    this.bindPanelToggles();
+  }
+
+  private bindPanelToggles() {
+    this.element.querySelectorAll<HTMLElement>("[data-panel-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panelId = button.getAttribute("data-panel-toggle");
+        const panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+
+        const isOpen = !panel.hasAttribute("hidden");
+        document.querySelectorAll<HTMLElement>(".switcher-panel").forEach((entry) => {
+          entry.setAttribute("hidden", "");
+        });
+        document.querySelectorAll<HTMLElement>("[data-panel-toggle]").forEach((entry) => {
+          entry.setAttribute("aria-expanded", "false");
+        });
+
+        if (!isOpen) {
+          panel.removeAttribute("hidden");
+          button.setAttribute("aria-expanded", "true");
+        }
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest(".switcher-panel") || target.closest("[data-panel-toggle]")) return;
+      document.querySelectorAll<HTMLElement>(".switcher-panel").forEach((entry) => {
+        entry.setAttribute("hidden", "");
+      });
+      document.querySelectorAll<HTMLElement>("[data-panel-toggle]").forEach((entry) => {
+        entry.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
+}
+
+document.body.dataset.controller = [document.body.dataset.controller, "site--interactive"]
+  .filter(Boolean)
+  .join(" ");
+
+const app = Application.start();
+app.register("site--interactive", SiteInteractiveController);
+```
+
+What this file now enables:
+
+- the site and locale controls still work as plain links without JavaScript
+- when JavaScript is present, the bundle opens and closes the switcher panels
+
+## Rebuild The Storefront Bundle
+
+Run:
+
+```bash
+npm run build
+```
+
+## Runnable Checkpoint
+
+Run:
+
+```bash
+npm run build
+cargo run -p tutorial-app-bin -- validate
+cargo run -p tutorial-app-bin -- serve
+```
+
+Then verify:
+
+- `http://uk.127.0.0.1.nip.io:8080/en-GB/` loads
+- `http://fr.127.0.0.1.nip.io:8080/fr-FR/` loads
+- the header renders site-switch and locale-switch links
+- the panel buttons open and close through the storefront bundle
 
 ## What To Read Next
 

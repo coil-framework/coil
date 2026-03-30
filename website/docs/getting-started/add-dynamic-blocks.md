@@ -101,18 +101,64 @@ crates/tutorial-app-backend/src/lib.rs
 templates/blocks/featured-events.html
 ```
 
-The lesson is structural:
+## What Each File Is Doing
 
-- editorial config chooses the block and its stored settings
-- runtime code resolves live records
-- the template renders the combined contract
+### `content/pages/spring-sale.json`
 
-This is also the handoff point to the newer CMS/page-builder workflow:
+This file still stores the editorial block instance.
 
-- page settings stay on the page record
-- ordered blocks remain the stored editorial shape
-- shared blocks stay reusable
-- runtime code supplies live block data without changing the editorial record
+The important fields are:
+
+- `block_type = "featured_events"`
+  This tells the runtime which kind of block it is dealing with.
+- `fields.heading`
+  Editor-owned display copy.
+- `fields.limit`
+  Editor-owned configuration for how much live data to request.
+- `fields.city`
+  Editor-owned filter criteria.
+
+This file does not store the actual event list. It stores the configuration needed to ask runtime
+code for one.
+
+### `crates/tutorial-app-backend/src/lib.rs`
+
+This file resolves request-time data.
+
+The important function is `featured_events_block_model(...)`.
+
+That function takes the stored block configuration and returns live values that should only exist at
+request time:
+
+- event titles
+- event links
+- any other derived runtime fields you need later
+
+This is the point where customer-owned Rust turns stored editorial intent into live page data.
+
+### `templates/blocks/featured-events.html`
+
+This file renders the combined contract.
+
+The important split in the template is:
+
+- `${block.fields.heading}`
+  editor-owned stored content
+- `${block.runtime.events}`
+  runtime-owned live data
+
+That split is the key dynamic-block seam. The template does not query for events itself. It renders
+what the runtime has already prepared.
+
+## What Behavior This Enables
+
+Once these files match:
+
+- editors can place a dynamic block on a page without hard-coding live records into CMS content
+- customer backend code can fetch or derive live data per request
+- templates can render one stable block contract that mixes stored fields and runtime fields
+- the app gains a clear schema/content/render-model handoff instead of hiding dynamic behavior in
+  templates
 
 ## Checkpoint
 
@@ -126,8 +172,3 @@ cargo run -p tutorial-app-bin -- serve
 - stored editorial config
 - request-time live data
 - fragment rendering
-
-## What Comes Next
-
-After this point the tutorial can move into richer product areas such as accounts, memberships,
-events, and admin flows.

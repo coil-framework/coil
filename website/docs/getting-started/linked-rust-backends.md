@@ -127,9 +127,63 @@ This is the pattern the tutorial eventually builds toward:
 - the app crate registers it
 - the runtime calls it through stable facades and hook traits
 
-The same pattern is what later chapters use for dynamic blocks and CMS editorial rules. When the
-CMS admin starts exposing page settings, ordered blocks, and reusable shared blocks, the linked
-backend remains the place for product-specific publish validation and runtime shaping.
+## What Each File Is Doing
+
+### `crates/tutorial-app-backend/Cargo.toml`
+
+This file creates an ordinary Rust crate for customer-owned backend logic.
+
+The important part is the dependency on `coil-customer-sdk`. That is the stable API boundary the
+crate uses to register hooks and talk to the runtime. This crate does not depend on runtime
+internals directly.
+
+### `crates/tutorial-app-backend/src/lib.rs`
+
+This file is where customer-specific rules live.
+
+In the small version, it only exposes a plugin type. That still matters, because it gives the app a
+stable place to add:
+
+- publish validation
+- checkout review rules
+- verified webhook handling
+- render-model shaping helpers
+
+In the second example, the important section is `validate_page_publish(...)`. That function is the
+actual business rule. It runs before a page is published and can allow or reject the action.
+
+### `crates/tutorial-app-app/src/lib.rs`
+
+This file owns runtime composition for the customer app.
+
+The important section is:
+
+```rust
+coil_all::builder()
+    .with_customer_plugin(tutorial_app_backend::TutorialAppPlugin)
+```
+
+That line is what links the customer backend into the running app. Without it, the backend crate
+can compile successfully and still never run.
+
+The module registrations below it matter too:
+
+- `admin()` enables operator surfaces
+- `cms()` enables page and editorial workflow surfaces
+- `commerce()` enables storefront and order surfaces
+
+That combination is what makes the linked backend meaningful. The hooks run in the context of real
+module-owned workflows.
+
+## What Behavior This Enables
+
+Once these files are in place:
+
+- the app has an explicit customer-owned backend lane
+- product-specific rules can participate in CMS and storefront workflows
+- customer logic is compiled, versioned, and tested like normal Rust code
+- later dynamic-block chapters can reuse the same backend crate for request-time shaping
+- later CMS workflow chapters can use the same crate for publish validation and operational rules
 
 ## Checkpoint
 
@@ -140,12 +194,6 @@ crates/tutorial-app-backend/Cargo.toml
 crates/tutorial-app-backend/src/lib.rs
 crates/tutorial-app-app/src/lib.rs
 ```
-
-A reviewer should be able to answer:
-
-- where customer-owned Rust lives
-- where it gets linked into the app
-- which file owns product-specific publish rules
 
 They should also be able to run the app with the linked backend in place:
 
@@ -159,5 +207,5 @@ cargo run -p tutorial-app-bin -- serve
 
 - [Customer project layout](customer-project-layout.md)
 - [Customer-root workspace](../core-concepts/customer-root-workspace.md)
-- [Render Model Hooks](../reference/render-model-hooks.md)
+- [Render model hooks](../reference/render-model-hooks.md)
 - [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)

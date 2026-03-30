@@ -2,33 +2,66 @@
 title: Getting Started Tutorial
 ---
 
-This tutorial builds one customer-owned Coil application in stages.
+This tutorial builds a customer-owned application named `tutorial-app`, but the concrete frontend
+reference in this repository is the checked-in Shoppr workspace under `apps/shoppr`.
 
-The rule for this section is simple: when a chapter introduces a file, the chapter should show you
-the file.
+Shoppr is the example to copy because it already uses the frontend split this tutorial is teaching:
 
-## The Tutorial App
+- server-rendered HTML and fragments
+- Turbo for HTML-over-the-wire navigation and form enhancement
+- Stimulus for browser-side controllers
+- PostCSS for CSS compilation
+- esbuild for JavaScript bundling
+- compiled assets emitted into `theme/assets`
 
-The examples use a generic workspace named `tutorial-app`.
+## The First Working State
 
-The first working checkpoint looks like this:
+The real checked-in frontend root looks like this:
 
 ```text
-tutorial-app/
+apps/shoppr/
   Cargo.toml
   app.toml
   platform.dev.toml
   docker-compose.yml
+  package.json
   crates/
-    tutorial-app-app/
-    tutorial-app-backend/
-    tutorial-app-bin/
+    shoppr-app/
+    shoppr-backend/
+    shoppr-bin/
   templates/
   theme/
-  auth/
+    build/
+      build.mjs
+    frontend/
+      site.ts
+      site.css
+      admin.ts
+      admin.css
+      cms-editor.ts
+      cms-editor.css
+    assets/
+  auth/shoppr-auth/
 ```
 
-The generated root `Cargo.toml` should already look like a real Rust workspace:
+Those files are the pieces you need to keep straight from the start:
+
+- `Cargo.toml` groups the Rust crates into one customer workspace
+- `app.toml` defines the product contract Coil boots
+- `platform.dev.toml` defines how that product runs locally
+- `package.json` is the browser build entrypoint, not a sidecar afterthought
+- `theme/build/build.mjs` turns source bundles into theme assets that templates can load
+- `theme/frontend/*` is the editable source tree for CSS and TypeScript
+- `theme/assets/*` is compiled output that Coil publishes and templates reference
+- `crates/shoppr-app` composes the runtime and module graph
+- `crates/shoppr-backend` is where customer-owned backend logic lives
+- `crates/shoppr-bin` is the process entrypoint
+
+## The First Five Files
+
+### `Cargo.toml`
+
+The root workspace file answers one question: which Rust crates make up the customer app?
 
 ```toml
 [workspace]
@@ -51,7 +84,18 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 ```
 
-The generated `app.toml` should already look like an app contract, not a placeholder:
+What you are looking at:
+
+- `[workspace].members`
+  Lists the three crates Cargo builds together.
+- `[workspace.package]`
+  Sets package defaults so the member crates do not each repeat edition, version, and license.
+- `[workspace.dependencies]`
+  Centralizes the shared dependencies the three crates use together.
+
+### `app.toml`
+
+`app.toml` is the product contract. It answers: what app is Coil booting?
 
 ```toml
 name = "tutorial-app"
@@ -81,7 +125,22 @@ name = "cms"
 name = "commerce"
 ```
 
-The matching `platform.dev.toml` should already be runnable:
+What each section controls:
+
+- `[domains]`
+  Defines the hostnames the app serves.
+- `[i18n]`
+  Defines the locale contract the runtime and router use.
+- `[theme]`
+  Points Coil at the compiled asset directory, not the source CSS or TypeScript.
+- `[auth]`
+  Tells the runtime which auth package directory to load.
+- `[[modules]]`
+  Chooses which first-party capabilities are installed into this app.
+
+### `platform.dev.toml`
+
+`platform.dev.toml` is the local runtime contract. It answers: how should this app run on your machine?
 
 ```toml
 [app]
@@ -115,70 +174,263 @@ mode = "local"
 local_root = ".coil/state"
 ```
 
-## The Working Loop
+What each section controls:
 
-Throughout the tutorial you will repeat this loop:
+- `[server]`
+  Picks the local bind address for the HTTP server.
+- `[database]`, `[cache]`, `[jobs]`
+  Pick the local backends the runtime will connect to.
+- `[storage]`
+  Sets the local path for file-backed runtime state.
 
-```bash
-docker compose up -d
-cargo run -p tutorial-app-bin -- validate
-cargo run -p tutorial-app-bin -- serve
+### `apps/shoppr/package.json`
+
+The checked-in Shoppr frontend toolchain also lives at the app root. That is deliberate. The
+browser build is part of the customer app, not an unrelated subproject.
+
+```json title="apps/shoppr/package.json"
+{
+  "name": "shoppr-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./theme/build/build.mjs",
+    "watch": "node ./theme/build/build.mjs --watch"
+  },
+  "dependencies": {
+    "@hotwired/stimulus": "^3.2.2",
+    "@hotwired/turbo": "^8.0.12"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.3",
+    "postcss-import": "^16.1.0",
+    "postcss-nesting": "^13.0.2"
+  }
+}
 ```
 
-When a chapter adds or changes a file, rerun that loop before moving on.
+What this file controls:
 
-## Where To Begin
+- `scripts.build`
+  Runs the production asset build and writes into `theme/assets/`.
+- `scripts.watch`
+  Rebuilds while you edit `theme/frontend/*`.
+- `dependencies`
+  Provide the runtime browser libraries that execute in the page.
+- `devDependencies`
+  Provide the local toolchain that compiles the bundles.
 
-Read these chapters in order:
+### `apps/shoppr/theme/build/build.mjs`
 
-- [What You Are Building](what-you-are-building.md)
-- [Create the Project](create-the-project.md)
-- [Understand the Runtime Shape](understand-the-runtime-shape.md)
-- [Build the Base Theme](build-the-base-theme.md)
-- [Add Sites, Markets, and Locales](add-sites-markets-and-locales.md)
-- [Add a Real Content Model](add-a-real-content-model.md)
-- [Build Reusable Blocks](build-reusable-blocks.md)
-- [Add Dynamic Blocks](add-dynamic-blocks.md)
+The checked-in Shoppr build script defines the asset contract:
+
+```js title="apps/shoppr/theme/build/build.mjs"
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import esbuild from "esbuild";
+import postcss from "postcss";
+import postcssImport from "postcss-import";
+import postcssNesting from "postcss-nesting";
+import autoprefixer from "autoprefixer";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const appRoot = path.resolve(__dirname, "..", "..");
+const frontendRoot = path.join(appRoot, "theme", "frontend");
+const assetRoot = path.join(appRoot, "theme", "assets");
+const watchMode = process.argv.includes("--watch");
+
+const jsEntries = {
+  site: path.join(frontendRoot, "site.ts"),
+  admin: path.join(frontendRoot, "admin.ts"),
+  "cms-editor": path.join(frontendRoot, "cms-editor.ts")
+};
+
+const cssEntries = {
+  site: path.join(frontendRoot, "site.css"),
+  admin: path.join(frontendRoot, "admin.css"),
+  "cms-editor": path.join(frontendRoot, "cms-editor.css")
+};
+
+async function buildCss() {
+  const processor = postcss([postcssImport(), postcssNesting(), autoprefixer()]);
+  await mkdir(assetRoot, { recursive: true });
+
+  for (const [name, sourcePath] of Object.entries(cssEntries)) {
+    const source = await readFile(sourcePath, "utf8");
+    const result = await processor.process(source, {
+      from: sourcePath,
+      to: path.join(assetRoot, `${name}.css`)
+    });
+    await writeFile(path.join(assetRoot, `${name}.css`), result.css, "utf8");
+  }
+}
+
+async function buildJs() {
+  await mkdir(assetRoot, { recursive: true });
+  return esbuild.build({
+    entryPoints: jsEntries,
+    outdir: assetRoot,
+    bundle: true,
+    format: "iife",
+    target: "es2020",
+    platform: "browser",
+    sourcemap: false,
+    logLevel: "info"
+  });
+}
+
+async function buildAll() {
+  await Promise.all([buildCss(), buildJs()]);
+}
+
+async function watch() {
+  await buildCss();
+
+  const context = await esbuild.context({
+    entryPoints: jsEntries,
+    outdir: assetRoot,
+    bundle: true,
+    format: "iife",
+    target: "es2020",
+    platform: "browser",
+    sourcemap: "inline",
+    logLevel: "info"
+  });
+
+  await context.watch();
+
+  let cssTimer = null;
+  fs.watch(frontendRoot, { recursive: true }, (_eventType, filename) => {
+    if (!filename || (!filename.endsWith(".css") && !filename.endsWith(".ts"))) {
+      return;
+    }
+    if (cssTimer) {
+      clearTimeout(cssTimer);
+    }
+    cssTimer = setTimeout(async () => {
+      try {
+        await buildCss();
+        console.log("[shoppr-frontend] CSS rebuilt");
+      } catch (error) {
+        console.error("[shoppr-frontend] CSS build failed");
+        console.error(error);
+      }
+    }, 75);
+  });
+
+  console.log("[shoppr-frontend] watching theme/frontend");
+}
+
+if (watchMode) {
+  await watch();
+} else {
+  await buildAll();
+}
+```
+
+Important sections:
+
+- `jsEntries`
+  Defines the three real browser bundles used by Shoppr.
+- `cssEntries`
+  Defines matching stylesheet entrypoints.
+- `assetRoot`
+  Makes `theme/assets` compiled output.
+- `buildCss()` and `buildJs()`
+  Compile source files from `theme/frontend/*`.
+- `watch()`
+  Rebuilds during local editing.
+
+## The Working Loop
+
+For the real frontend build loop in this repo, use the Shoppr workspace directly:
+
+```bash
+cd apps/shoppr
+npm install
+npm run build
+./scripts/prepare-local-dev.sh
+cargo run -p shoppr -- validate
+COIL_COOKIE_SECRET=01234567012345670123456701234567 \
+COIL_CSRF_SECRET=76543210765432107654321076543210 \
+cargo run -p shoppr -- up --config platform.dev.toml
+```
+
+Those commands exercise different parts of the system:
+
+- `cd apps/shoppr`
+  Puts you in the real checked-in customer workspace.
+- `npm install`
+  Installs the frontend toolchain and browser dependencies.
+- `npm run build`
+  Compiles `theme/frontend/*` into `theme/assets/*`.
+- `./scripts/prepare-local-dev.sh`
+  Writes the local Cargo patch overlay used for in-repo development.
+- `validate`
+  Proves the Shoppr workspace and config agree.
+- `up --config platform.dev.toml`
+  Boots the real Shoppr app through the customer-owned binary.
+
+During theme work, add:
+
+```bash
+cd apps/shoppr
+npm run watch
+```
+
+That command keeps rebuilding the storefront, admin, and CMS editor bundles while you edit source
+files under `theme/frontend/`.
+
+## Read Order
+
+Read the tutorial in this order:
+
+1. [What You Are Building](what-you-are-building.md)
+2. [Create the Project](create-the-project.md)
+3. [Understand the Runtime Shape](understand-the-runtime-shape.md)
+4. [Build the Base Theme](build-the-base-theme.md)
+5. [Add Sites, Markets, and Locales](add-sites-markets-and-locales.md)
+6. [Add a Real Content Model](add-a-real-content-model.md)
+7. [Build Reusable Blocks](build-reusable-blocks.md)
+8. [Add Dynamic Blocks](add-dynamic-blocks.md)
+9. [Model Brands, Categories, and Discovery](model-brands-categories-and-discovery.md)
+10. [Add Authentication and Customer Accounts](add-authentication-and-customer-accounts.md)
+11. [Add Memberships and Audience Gating](add-memberships-and-audience-gating.md)
+12. [Add Events and Timeslots](add-events-and-timeslots.md)
+13. [Add Bookings, Reservations, and Validation](add-bookings-reservations-and-validation.md)
+14. [Add Passes or Credits](add-passes-or-credits.md)
+15. [Add Admin Resources](add-admin-resources.md)
+16. [Add One Reproducible Integration](add-one-reproducible-integration.md)
+17. [Add Jobs, Notifications, and Scheduled Work](add-jobs-notifications-and-scheduled-work.md)
+18. [Add Observability and Troubleshooting](add-observability-and-troubleshooting.md)
+19. [Prepare for Production](prepare-for-production.md)
+20. [Where to Go Next](where-to-go-next.md)
 
 Supporting pages:
 
 - [Customer Project Layout](customer-project-layout.md)
 - [Linked Rust Backends](linked-rust-backends.md)
 
-## Fast Bootstrap
-
-If you only want the shortest smoke test:
-
-```bash
-cargo install cargo-coil --locked
-cargo coil new tutorial-app
-cd tutorial-app
-docker compose up -d
-cargo run -p tutorial-app-bin -- validate
-cargo run -p tutorial-app-bin -- serve
-```
-
-That gets you a running app. The rest of this section is where the file ownership and runtime
-shape become understandable.
-
 ## Checkpoint
 
-From a fresh generated workspace, these commands should all succeed:
+From the checked-in Shoppr workspace, these commands should all succeed:
 
 ```bash
-docker compose up -d
-cargo run -p tutorial-app-bin -- validate
-cargo run -p tutorial-app-bin -- serve
+cd apps/shoppr
+npm install
+npm run build
+./scripts/prepare-local-dev.sh
+cargo run -p shoppr -- validate
+COIL_COOKIE_SECRET=01234567012345670123456701234567 \
+COIL_CSRF_SECRET=76543210765432107654321076543210 \
+cargo run -p shoppr -- up --config platform.dev.toml
 ```
 
-At this point you should have a running app and these concrete files on disk:
-
-```text
-Cargo.toml
-app.toml
-platform.dev.toml
-docker-compose.yml
-crates/tutorial-app-app/src/lib.rs
-crates/tutorial-app-backend/src/lib.rs
-crates/tutorial-app-bin/src/main.rs
-```
+At this point the tutorial has a concrete Shoppr-based starting state for both Rust and frontend
+work.

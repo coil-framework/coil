@@ -20,6 +20,12 @@ They are written as product requirements, not implementation detail notes. The g
   Defines the documentation strategy for turning Getting Started into a full step-by-step build of a realistic retail, events, and memberships site.
 - [07-implementation-program.md](./07-implementation-program.md)
   Breaks the requirement set into executable epics, workstreams, task slices, and acceptance criteria.
+- [08-gap-audit-and-realignment.md](./08-gap-audit-and-realignment.md)
+  Records the current gap between the requirement set and the implementation state, then realigns the next execution tranches.
+- [09-detailed-execution-plan.md](./09-detailed-execution-plan.md)
+  Turns requirements 01 through 06 into the active dependency-ordered execution backlog covering framework work, demo work, tutorial work, chapter status, and acceptance criteria.
+- [10-frontend-architecture-ssr-fragments-and-progressive-enhancement.md](./10-frontend-architecture-ssr-fragments-and-progressive-enhancement.md)
+  Defines the frontend architecture requirements for SSR fragments, declared frontend contributions, route-aware asset loading, customer overrides, extension slots, and a Stimulus/Turbo/PostCSS/esbuild stack.
 
 ## Cross-Cutting Principles
 

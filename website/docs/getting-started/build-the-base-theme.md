@@ -2,12 +2,21 @@
 title: Build the Base Theme
 ---
 
-This chapter is the first visible UI step. The goal is to establish a real shell that later pages,
-accounts, and CMS content can live inside.
+This chapter replaces the generated placeholder shell with a real storefront layout, a real home
+page, and the first storefront frontend bundle.
+
+## Purpose
+
+At the end of this chapter:
+
+- every public page renders inside one shared storefront layout
+- the layout loads the compiled storefront CSS and JavaScript bundles
+- the app has one concrete storefront controller entrypoint
+- the home page has real public entry points into commerce and membership flows
 
 ## Replace `templates/layouts/base.html`
 
-Create or replace `templates/layouts/base.html` with a layout that already has usable landmarks:
+This file defines the storefront shell and loads the storefront bundle.
 
 ```html
 <!doctype html>
@@ -15,18 +24,24 @@ Create or replace `templates/layouts/base.html` with a layout that already has u
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page.title}">Tutorial App</title>
+    <title coil:text="${page_title}">Tutorial App</title>
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
+    <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body>
+  <body class="tutorial-shell">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="brand" href="/" coil:attr="href=${links.home}">Tutorial App</a>
-      <nav aria-label="Primary">
-        <a href="/" coil:attr="href=${links.home}">Home</a>
-        <a href="/shop" coil:attr="href=${links.catalog}">Shop</a>
-        <a href="/account" coil:attr="href=${links.account}">Account</a>
-      </nav>
+      <div class="site-header__main">
+        <a class="brand" href="/" coil:attr="href=${links.home}">
+          <span class="brand__mark">T</span>
+          <span class="brand__wordmark">Tutorial App</span>
+        </a>
+        <nav aria-label="Primary">
+          <a href="/" coil:attr="href=${links.home}">Home</a>
+          <a href="/shop" coil:attr="href=${links.catalog}">Shop</a>
+          <a href="/account" coil:attr="href=${links.account}">Account</a>
+        </nav>
+      </div>
     </header>
     <main id="main" class="site-main">
       <coil:block coil:insert="${content}">
@@ -34,26 +49,43 @@ Create or replace `templates/layouts/base.html` with a layout that already has u
       </coil:block>
     </main>
     <footer class="site-footer">
-      <nav aria-label="Footer">
-        <a href="/pages/about">About</a>
-        <a href="/pages/shipping">Shipping</a>
-        <a href="/pages/support">Support</a>
-      </nav>
       <small>Tutorial App</small>
     </footer>
   </body>
 </html>
 ```
 
+What each section does:
+
+- `asset('theme/assets/site.css')`
+  Loads the compiled storefront stylesheet.
+- `asset('theme/assets/site.js')`
+  Loads the compiled storefront JavaScript bundle.
+- `${links.home}`, `${links.catalog}`, `${links.account}`
+  Keep navigation server-owned.
+- `<coil:block coil:insert="${content}">`
+  Marks where child pages render.
+
+What you should edit:
+
+- brand label
+- primary navigation
+- shell-wide layout and semantics
+
+What this enables:
+
+- one shared storefront shell
+- one consistent place for the public bundle load
+
 ## Replace `templates/pages/home.html`
 
-The home page should already look product-owned:
+This file becomes the first real public route in the app.
 
 ```html
 <!doctype html>
 <html xmlns:coil="https://coil.rs" coil:replace="~{layouts/base}">
   <body>
-    <section class="hero">
+    <section class="hero" data-controller="site--interactive">
       <p class="eyebrow">New season</p>
       <h1>Retail, memberships, and editorial content in one customer app.</h1>
       <p>
@@ -84,9 +116,81 @@ The home page should already look product-owned:
 </html>
 ```
 
-## Replace `theme/assets/site.css`
+What each section does:
 
-Create or replace `theme/assets/site.css`:
+- `coil:replace="~{layouts/base}"`
+  Renders the home page inside the storefront shell.
+- `data-controller="site--interactive"`
+  Gives the storefront bundle a stable place to attach.
+- `.hero`
+  Creates the first public content block.
+- `.hero-actions`
+  Establishes public route entry points the rest of the tutorial will fill in.
+
+## Replace `theme/frontend/site.ts`
+
+This file defines the first storefront controller bundle.
+
+```ts
+import "@hotwired/turbo";
+import { Application, Controller } from "@hotwired/stimulus";
+
+class SiteInteractiveController extends Controller<HTMLElement> {
+  connect() {
+    this.bindPanelToggles();
+  }
+
+  private bindPanelToggles() {
+    this.element.querySelectorAll<HTMLElement>("[data-panel-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panelId = button.getAttribute("data-panel-toggle");
+        const panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+
+        const isOpen = !panel.hasAttribute("hidden");
+        document.querySelectorAll<HTMLElement>(".switcher-panel").forEach((entry) => {
+          entry.setAttribute("hidden", "");
+        });
+        document.querySelectorAll<HTMLElement>("[data-panel-toggle]").forEach((entry) => {
+          entry.setAttribute("aria-expanded", "false");
+        });
+
+        if (!isOpen) {
+          panel.removeAttribute("hidden");
+          button.setAttribute("aria-expanded", "true");
+        }
+      });
+    });
+  }
+}
+
+document.body.dataset.controller = [document.body.dataset.controller, "site--interactive"]
+  .filter(Boolean)
+  .join(" ");
+
+const app = Application.start();
+app.register("site--interactive", SiteInteractiveController);
+```
+
+What each section does:
+
+- `import "@hotwired/turbo"`
+  Enables Turbo on public pages.
+- `Application.start()`
+  Starts Stimulus for the storefront shell.
+- `SiteInteractiveController`
+  Owns small storefront-only interaction.
+- `document.body.dataset.controller = ...`
+  Attaches the storefront controller to the rendered page.
+
+What you should edit:
+
+- public page interaction only
+- keep business state on the server and use this file for browser behavior
+
+## Replace `theme/frontend/site.css`
+
+This file defines the source stylesheet for the storefront bundle.
 
 ```css
 :root {
@@ -176,25 +280,50 @@ body {
 }
 ```
 
-At the end of this chapter, these three files should exist as real files in the tutorial app:
+What each section does:
 
-```text
-templates/layouts/base.html
-templates/pages/home.html
-theme/assets/site.css
-```
+- `:root`
+  Defines reusable design tokens.
+- `.site-header`, `.site-footer`, `.site-main`
+  Create the base layout width.
+- `.hero`, `.card`, `.button`
+  Create the first public UI primitives.
 
-## Checkpoint
+Important boundary:
+
+- edit `theme/frontend/site.css`
+- build to produce `theme/assets/site.css`
+- do not edit `theme/assets/site.css` directly
+
+## Build The Storefront Bundle
 
 Run:
 
 ```bash
+npm run build
+```
+
+That command compiles:
+
+- `theme/frontend/site.ts` -> `theme/assets/site.js`
+- `theme/frontend/site.css` -> `theme/assets/site.css`
+
+## Runnable Checkpoint
+
+Run:
+
+```bash
+npm run build
 cargo run -p tutorial-app-bin -- validate
 cargo run -p tutorial-app-bin -- serve
 ```
 
-At the end of this chapter, a reviewer should be able to open the app and see a branded shell, a
-usable home page, and layout landmarks that later pages can inherit.
+Then verify:
+
+- the header and footer render on the page
+- the home page shows the hero and content cards
+- the layout loads `site.css` and `site.js`
+- the public page still works as a normal server-rendered page even if the browser-side behavior is minimal
 
 ## What To Read Next
 

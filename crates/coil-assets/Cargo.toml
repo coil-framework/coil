@@ -14,7 +14,7 @@ readme = "README.md"
 coil-auth = { version = "0.1.1", path = "../coil-auth" }
 coil-storage = { version = "0.1.1", path = "../coil-storage" }
 sha2 = "0.10"
-thiserror = "1.0"
+thiserror = "2.0"
 
 [dev-dependencies]
 coil-config = { version = "0.1.1", path = "../coil-config" }

@@ -28,5 +28,5 @@ coil-wasm = { version = "0.1.1", path = "../coil-wasm" }
 hmac = "0.12"
 rand = "0.8"
 sha2 = "0.10"
-thiserror = "1.0"
+thiserror = "2.0"
 toml = "0.8"

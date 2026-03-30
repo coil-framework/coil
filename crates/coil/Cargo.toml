@@ -27,5 +27,5 @@ coil-media = { version = "0.1.1", path = "../coil-media" }
 coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
 coil-ops = { version = "0.1.1", path = "../coil-ops" }
 coil-runtime = { version = "0.1.1", path = "../coil-runtime" }
-thiserror = "1.0"
+thiserror = "2.0"
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }

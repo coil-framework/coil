@@ -67,7 +67,7 @@ enabled = ["cms", "media", "commerce", "commerce-payments-stripe", "memberships"
 [[extensions]]
 id = "shoppr-waitlist-tools"
 package_version = "0.1.0"
-artifact_sha256 = "3ad7b44218d04a3eba602051cbcb991bdd1ab69fd55ad995cd688af26ca6d067"
+artifact_sha256 = "86dd37605814d2e87a188d913eb4ec5741f85f21a6ebcced776d6d68bfd87c64"
 customer_app_id = "shoppr"
 
 [[extensions.handlers]]
@@ -77,7 +77,7 @@ grants = []
 [[extensions]]
 id = "shoppr-waitlist-ops-widget"
 package_version = "0.1.0"
-artifact_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+artifact_sha256 = "da915dc331157d559cd8c74b6fde674a4c65747653a0da90972bfabb9198b3c4"
 customer_app_id = "shoppr"
 
 [[extensions.handlers]]

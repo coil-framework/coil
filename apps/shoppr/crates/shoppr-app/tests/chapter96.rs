@@ -79,6 +79,10 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     fs::create_dir_all(&temp_root).unwrap();
     copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
     copy_dir_recursive(
+        &source_root.join("translations"),
+        &temp_root.join("translations"),
+    );
+    copy_dir_recursive(
         &source_root.join("extensions"),
         &temp_root.join("extensions"),
     );
@@ -115,7 +119,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     let dockerfile_repo = include_str!("../../../Dockerfile.repo");
 
     assert!(dashboard.contains("Linked customer backend"), "{dashboard}");
-    assert!(dashboard.contains("linkedCustomerPlugins"), "{dashboard}");
+    assert!(dashboard.contains("linked_customer_plugins"), "{dashboard}");
     assert!(
         dashboard.contains("Workspace-owned Rust hook path"),
         "{dashboard}"
@@ -146,7 +150,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
         "{app_readme}"
     );
     assert!(
-        app_readme.contains("cargo run -p shoppr -- up"),
+        app_readme.contains("cargo coil dev"),
         "{app_readme}"
     );
     assert!(
@@ -176,7 +180,7 @@ fn admin_dashboard_surfaces_the_linked_workspace_backend() {
     );
     assert!(!cargo_toml.contains("[patch.crates-io]"), "{cargo_toml}");
     assert!(
-        cargo_toml.contains("coil = \"0.1.0\""),
+        cargo_toml.contains("coil = { package = \"coil-rs\", version = \"0.1.0\" }"),
         "{cargo_toml}"
     );
     assert!(

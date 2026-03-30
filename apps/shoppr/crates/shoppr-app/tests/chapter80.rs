@@ -83,6 +83,10 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     copy_dir_recursive(&source_root.join("auth"), &temp_root.join("auth"));
     copy_dir_recursive(&source_root.join("templates"), &temp_root.join("templates"));
     copy_dir_recursive(
+        &source_root.join("translations"),
+        &temp_root.join("translations"),
+    );
+    copy_dir_recursive(
         &source_root.join("extensions"),
         &temp_root.join("extensions"),
     );
@@ -206,15 +210,33 @@ signed_url_ttl_secs = 900
     let workspace = ShopprWorkspace::at(&temp_root.path).unwrap();
     let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
 
-    assert_eq!(bootstrap.manifest.extensions.len(), 1);
+    let manifest_extension_ids = bootstrap
+        .manifest
+        .extensions
+        .iter()
+        .map(|extension| extension.id.to_string())
+        .collect::<Vec<_>>();
     assert_eq!(
-        bootstrap.manifest.extensions[0].id.as_str(),
-        "shoppr-waitlist-tools"
+        manifest_extension_ids,
+        vec![
+            "shoppr-waitlist-tools".to_string(),
+            "shoppr-waitlist-ops-widget".to_string()
+        ]
     );
-    assert_eq!(bootstrap.runtime_plan.runtime.installed_extensions.len(), 1);
+
+    let installed_extension_ids = bootstrap
+        .runtime_plan
+        .runtime
+        .installed_extensions
+        .iter()
+        .map(|extension| extension.extension_id.clone())
+        .collect::<Vec<_>>();
     assert_eq!(
-        bootstrap.runtime_plan.runtime.installed_extensions[0].extension_id,
-        "shoppr-waitlist-tools"
+        installed_extension_ids,
+        vec![
+            "shoppr-waitlist-tools".to_string(),
+            "shoppr-waitlist-ops-widget".to_string()
+        ]
     );
 }
 

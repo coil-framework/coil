@@ -109,6 +109,7 @@ pub trait JobsCoordinationRuntime: Send + Sync + 'static {
         reason: DeadLetterReason,
         error_message: String,
     ) -> Result<JobFailureDisposition, JobsModelError>;
+    fn cancel(&self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError>;
     fn is_shared_backend(&self) -> bool {
         true
     }
@@ -293,6 +294,10 @@ impl JobsBackendAdapter {
     ) -> Result<JobFailureDisposition, JobsModelError> {
         self.runtime
             .acknowledge_failed(lease, now, reason, error_message)
+    }
+
+    pub(crate) fn cancel(&self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError> {
+        self.runtime.cancel(queue, job_id)
     }
 }
 

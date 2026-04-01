@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::SocketAddr;
 
 use ipnet::IpNet;
@@ -15,6 +16,16 @@ pub enum Environment {
     Development,
     Staging,
     Production,
+}
+
+impl fmt::Display for Environment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Development => write!(f, "development"),
+            Self::Staging => write!(f, "staging"),
+            Self::Production => write!(f, "production"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

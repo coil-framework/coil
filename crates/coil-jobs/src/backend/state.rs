@@ -222,6 +222,44 @@ impl JobsBackendState {
         Ok(record)
     }
 
+    pub(super) fn cancel(
+        &mut self,
+        queue: &JobQueueName,
+        job_id: &JobId,
+    ) -> Result<bool, JobsModelError> {
+        if let Some(index) = self
+            .snapshot
+            .ready
+            .iter()
+            .position(|j| &j.spec.queue == queue && &j.spec.job_id == job_id)
+        {
+            self.snapshot.ready.remove(index);
+            return Ok(true);
+        }
+
+        if let Some(index) = self
+            .snapshot
+            .scheduled
+            .iter()
+            .position(|j| &j.spec.queue == queue && &j.spec.job_id == job_id)
+        {
+            self.snapshot.scheduled.remove(index);
+            return Ok(true);
+        }
+
+        if let Some(index) = self
+            .snapshot
+            .in_flight
+            .iter()
+            .position(|l| &l.record.spec.queue == queue && &l.record.spec.job_id == job_id)
+        {
+            self.snapshot.in_flight.remove(index);
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
     fn require_active_leadership(
         &self,
         node_id: &str,

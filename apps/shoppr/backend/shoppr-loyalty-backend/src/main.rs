@@ -5,7 +5,7 @@ use shoppr_loyalty_backend::{BackendConfig, build_router};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This binary is the optional sidecar wrapper around the linked Shoppr customer backend crate.
-    let bind = env::var("SHOPPR_BACKEND_BIND").unwrap_or_else(|_| "0.0.0.0:8081".to_string());
+    let bind = env::var("SHOPPR_BACKEND_BIND").unwrap_or_else(|_| "0.0.0.0:8091".to_string());
     let config = BackendConfig {
         brand: env::var("SHOPPR_BACKEND_BRAND").unwrap_or_else(|_| "Shoppr".to_string()),
         webhook_secret: env::var("SHOPPR_BACKEND_WEBHOOK_SECRET")

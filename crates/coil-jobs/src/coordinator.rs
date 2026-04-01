@@ -154,6 +154,12 @@ impl JobsCoordinator {
         Ok(outcome)
     }
 
+    pub fn cancel(&mut self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError> {
+        let cancelled = self.backend.cancel(queue, job_id)?;
+        self.refresh();
+        Ok(cancelled)
+    }
+
     pub fn dispatch_event<P>(
         &mut self,
         domain: &crate::JobsDomain,

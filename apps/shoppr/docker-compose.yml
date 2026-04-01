@@ -42,11 +42,11 @@ services:
       context: .
       dockerfile: backend/shoppr-loyalty-backend/Dockerfile
     environment:
-      SHOPPR_BACKEND_BIND: "0.0.0.0:8081"
+      SHOPPR_BACKEND_BIND: "0.0.0.0:8091"
       SHOPPR_BACKEND_BRAND: "Shoppr"
       SHOPPR_BACKEND_WEBHOOK_SECRET: "${SHOPPR_BACKEND_WEBHOOK_SECRET:-shoppr-backend-dev-secret}"
     ports:
-      - "8081:8081"
+      - "8091:8091"
     restart: unless-stopped
 
   postgres:

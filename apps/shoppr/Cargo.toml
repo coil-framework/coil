@@ -18,19 +18,22 @@ anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
-coil-admin = "0.1.0"
-coil = { package = "coil-rs", version = "0.1.0" }
-coil-app = "0.1.0"
-coil-assets = "0.1.0"
-coil-auth = "0.1.0"
-coil-cms = "0.1.0"
-coil-commerce = "0.1.0"
-coil-config = "0.1.0"
-coil-core = "0.1.0"
-coil-customer-sdk = "0.1.0"
-coil-data = "0.1.0"
-coil-events = "0.1.0"
-coil-media = "0.1.0"
-coil-memberships = "0.1.0"
-coil-ops = "0.1.0"
-coil-runtime = "0.1.0"
+coil-admin = { version = "0.1.1", path = "../../crates/coil-admin" }
+coil = { package = "coil-rs", version = "0.1.1", path = "../../crates/coil" }
+coil-app = { version = "0.1.1", path = "../../crates/coil-app" }
+coil-assets = { version = "0.1.1", path = "../../crates/coil-assets" }
+coil-auth = { version = "0.1.1", path = "../../crates/coil-auth" }
+coil-cms = { version = "0.1.1", path = "../../crates/coil-cms" }
+coil-commerce = { version = "0.1.1", path = "../../crates/coil-commerce" }
+coil-config = { version = "0.1.1", path = "../../crates/coil-config" }
+coil-core = { version = "0.1.1", path = "../../crates/coil-core" }
+coil-customer-sdk = { version = "0.1.1", path = "../../crates/coil-customer-sdk" }
+coil-data = { version = "0.1.1", path = "../../crates/coil-data" }
+coil-events = { version = "0.1.1", path = "../../crates/coil-events" }
+coil-media = { version = "0.1.1", path = "../../crates/coil-media" }
+coil-memberships = { version = "0.1.1", path = "../../crates/coil-memberships" }
+coil-ops = { version = "0.1.1", path = "../../crates/coil-ops" }
+coil-runtime = { version = "0.1.1", path = "../../crates/coil-runtime" }
+coil-seo = { version = "0.1.1", path = "../../crates/coil-seo" }
+coil-template = { version = "0.1.1", path = "../../crates/coil-template" }
+coil-tls = { version = "0.1.1", path = "../../crates/coil-tls" }

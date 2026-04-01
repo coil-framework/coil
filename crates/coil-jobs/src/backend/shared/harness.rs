@@ -84,6 +84,10 @@ impl JobsCoordinationRuntime for SharedJobsRuntimeHarness {
             .acknowledge_failed(lease, now, reason, error_message)
     }
 
+    fn cancel(&self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError> {
+        self.runtime.cancel(queue, job_id)
+    }
+
     fn is_shared_backend(&self) -> bool {
         true
     }

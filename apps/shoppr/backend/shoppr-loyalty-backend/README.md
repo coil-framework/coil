@@ -51,7 +51,7 @@ The primary connection path is the linked crate:
 The optional sidecar path is secondary:
 
 1. `apps/shoppr/docker-compose.yml` defines the optional `shoppr-backend-example` service
-2. that service builds this crate and exposes it on `http://localhost:8081`
+2. that service builds this crate and exposes it on `http://localhost:8091`
 3. `src/main.rs` loads `SHOPPR_BACKEND_*` settings
 4. `src/http.rs` maps HTTP routes onto the same rules from `src/lib.rs`
 
@@ -95,7 +95,7 @@ From `apps/shoppr`:
 cargo run -p shoppr-loyalty-backend
 ```
 
-By default the optional sidecar binds to `0.0.0.0:8081`.
+By default the optional sidecar binds to `0.0.0.0:8091`.
 
 To run it with the full Shoppr stack:
 
@@ -114,11 +114,11 @@ docker compose -f docker-compose.yml -f docker-compose.repo.yml --profile backen
 
 Useful routes:
 
-- `GET http://localhost:8081/`
-- `GET http://localhost:8081/health`
-- `POST http://localhost:8081/api/loyalty/preview`
-- `POST http://localhost:8081/api/orders/review`
-- `POST http://localhost:8081/webhooks/crm/contact-updated`
+- `GET http://localhost:8091/`
+- `GET http://localhost:8091/health`
+- `POST http://localhost:8091/api/loyalty/preview`
+- `POST http://localhost:8091/api/orders/review`
+- `POST http://localhost:8091/webhooks/crm/contact-updated`
 
 ## Exercise The Example
 
@@ -126,7 +126,7 @@ Preview a Shoppr-specific loyalty rule:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/api/loyalty/preview \
+  -X POST http://localhost:8091/api/loyalty/preview \
   -H 'content-type: application/json' \
   --data @apps/shoppr/backend/shoppr-loyalty-backend/requests/loyalty-preview.json
 ```
@@ -135,7 +135,7 @@ Exercise the fail-closed webhook route:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/webhooks/crm/contact-updated \
+  -X POST http://localhost:8091/webhooks/crm/contact-updated \
   -H 'content-type: application/json' \
   -H "x-shoppr-backend-secret: ${SHOPPR_BACKEND_WEBHOOK_SECRET:-shoppr-backend-dev-secret}" \
   --data @apps/shoppr/backend/shoppr-loyalty-backend/requests/contact-updated.json
@@ -145,7 +145,7 @@ Exercise a second Shoppr-specific Rust rule for fulfilment/ops routing:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/api/orders/review \
+  -X POST http://localhost:8091/api/orders/review \
   -H 'content-type: application/json' \
   --data @apps/shoppr/backend/shoppr-loyalty-backend/requests/order-review.json
 ```

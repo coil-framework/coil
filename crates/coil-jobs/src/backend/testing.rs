@@ -85,6 +85,11 @@ impl JobsCoordinationRuntime for EmulatedJobsCoordinationRuntime {
         guard.acknowledge_failed(lease, now, reason, error_message)
     }
 
+    fn cancel(&self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError> {
+        let mut guard = self.state.lock().expect("jobs backend mutex poisoned");
+        guard.cancel(queue, job_id)
+    }
+
     fn is_shared_backend(&self) -> bool {
         false
     }

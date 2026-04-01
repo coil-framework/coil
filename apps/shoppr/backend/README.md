@@ -75,7 +75,7 @@ docker compose --profile backend-example up --build
 
 That uses Shoppr itself as the Docker build context and starts the normal Shoppr stack
 plus the optional sidecar adapter on
-`http://localhost:8081`.
+`http://localhost:8091`.
 
 If you are building Shoppr against the live Coil monorepo before upstream publication, use
 the explicit repo override instead:
@@ -86,11 +86,11 @@ docker compose -f docker-compose.yml -f docker-compose.repo.yml --profile backen
 
 Useful routes:
 
-- `GET http://localhost:8081/`
-- `GET http://localhost:8081/health`
-- `POST http://localhost:8081/api/loyalty/preview`
-- `POST http://localhost:8081/api/orders/review`
-- `POST http://localhost:8081/webhooks/crm/contact-updated`
+- `GET http://localhost:8091/`
+- `GET http://localhost:8091/health`
+- `POST http://localhost:8091/api/loyalty/preview`
+- `POST http://localhost:8091/api/orders/review`
+- `POST http://localhost:8091/webhooks/crm/contact-updated`
 
 You can also run just the optional sidecar adapter without Docker Compose:
 
@@ -105,7 +105,7 @@ Preview a customer-specific loyalty decision:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/api/loyalty/preview \
+  -X POST http://localhost:8091/api/loyalty/preview \
   -H 'content-type: application/json' \
   --data @backend/shoppr-loyalty-backend/requests/loyalty-preview.json
 ```
@@ -114,7 +114,7 @@ Preview a Shoppr-specific fulfilment decision:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/api/orders/review \
+  -X POST http://localhost:8091/api/orders/review \
   -H 'content-type: application/json' \
   --data @backend/shoppr-loyalty-backend/requests/order-review.json
 ```
@@ -123,7 +123,7 @@ Exercise the signed webhook path:
 
 ```bash
 curl -sS \
-  -X POST http://localhost:8081/webhooks/crm/contact-updated \
+  -X POST http://localhost:8091/webhooks/crm/contact-updated \
   -H 'content-type: application/json' \
   -H 'x-shoppr-backend-secret: shoppr-backend-dev-secret' \
   --data @backend/shoppr-loyalty-backend/requests/contact-updated.json

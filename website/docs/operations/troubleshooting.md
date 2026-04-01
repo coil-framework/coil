@@ -190,7 +190,7 @@ Check:
 Concrete Shoppr examples:
 
 - payment callback: `/webhooks/commerce/payment-provider`
-- sidecar CRM example: `POST http://localhost:8081/webhooks/crm/contact-updated`
+- sidecar CRM example: `POST http://localhost:8091/webhooks/crm/contact-updated`
 - secrets in `apps/shoppr/.env.example`
 
 ## Extension Problems

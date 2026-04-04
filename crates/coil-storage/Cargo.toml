@@ -14,7 +14,7 @@ readme = "README.md"
 coil-config = { version = "0.1.1", path = "../coil-config" }
 bytes = "1"
 futures = "0.3"
-object_store = { version = "0.13.1", default-features = false, features = ["aws"] }
+object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

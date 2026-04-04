@@ -37,7 +37,7 @@ coil-tls = { version = "0.1.1", path = "../coil-tls" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread"] }
 toml = "0.8"
 zanzibar = { workspace = true }

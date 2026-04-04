@@ -13,6 +13,6 @@ readme = "README.md"
 [dependencies]
 ipnet = "2"
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0"
+thiserror = "2.0"
 toml = "0.8"
 url = { version = "2", features = ["serde"] }

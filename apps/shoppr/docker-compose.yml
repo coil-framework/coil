@@ -26,11 +26,11 @@ services:
         access_key_id="minio"
         secret_access_key="minio123"
     ports:
-      - "8080:8080"
+      - "8088:8088"
     volumes:
       - coil-shoppr-appdata:/app/.coil
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8088/ready >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 20

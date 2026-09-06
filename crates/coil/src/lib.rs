@@ -8,8 +8,8 @@ use coil_media::MediaModule;
 use coil_memberships::MembershipsModule;
 use coil_ops::OpsModule;
 use coil_runtime::{
-    RuntimeBuilder, customer_root_bootstrap_inputs_from_env,
-    customer_root_bootstrap_inputs_from_paths,
+    customer_root_bootstrap_inputs_from_env, customer_root_bootstrap_inputs_from_paths,
+    RuntimeBuilder,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -28,6 +28,11 @@ pub use coil_core::PlatformModule;
 pub use coil_customer_sdk as customer_sdk;
 pub use coil_customer_sdk::*;
 pub use coil_events as events;
+pub use coil_fission as fission_app;
+pub use coil_fission::{
+    fission, CoilPrincipal, CoilRequestScope, CoilSessionState, SiteDefinition, SiteRegistry,
+    SiteRegistryError,
+};
 pub use coil_media as media;
 pub use coil_memberships as memberships;
 pub use coil_ops as ops;

@@ -17,6 +17,7 @@ members = [
     "crates/coil-customer-sdk",
     "crates/coil-data",
     "crates/coil-events",
+    "crates/coil-fission",
     "crates/coil-i18n",
     "crates/coil-import",
     "crates/coil-jobs",
@@ -41,4 +42,5 @@ version = "0.1.1"
 rust-version = "1.85"
 
 [workspace.dependencies]
+fission = { version = "0.14.1", path = "../../fission/fission/crates/authoring/fission", default-features = false }
 zanzibar = "0.1.0"

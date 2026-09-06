@@ -23,6 +23,7 @@ coil-config = { version = "0.1.1", path = "../coil-config" }
 coil-core = { version = "0.1.1", path = "../coil-core" }
 coil-customer-sdk = { version = "0.1.1", path = "../coil-customer-sdk" }
 coil-events = { version = "0.1.1", path = "../coil-events" }
+coil-fission = { version = "0.1.1", path = "../coil-fission" }
 coil-media = { version = "0.1.1", path = "../coil-media" }
 coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
 coil-ops = { version = "0.1.1", path = "../coil-ops" }

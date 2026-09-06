@@ -157,7 +157,31 @@ pub fn public_revalidation(
 }
 
 fn normalize_host(host: &str) -> Option<String> {
-    let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    let raw = host.trim();
+    let without_port = if let Some(ipv6) = raw.strip_prefix('[') {
+        let end = ipv6.find(']')?;
+        let remainder = &ipv6[end + 1..];
+        if !remainder.is_empty()
+            && (!remainder.starts_with(':')
+                || !remainder[1..].bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return None;
+        }
+        &ipv6[..end]
+    } else {
+        match raw.rsplit_once(':') {
+            Some((candidate, port))
+                if !candidate.contains(':')
+                    && !candidate.is_empty()
+                    && !port.is_empty()
+                    && port.bytes().all(|byte| byte.is_ascii_digit()) =>
+            {
+                candidate
+            }
+            _ => raw,
+        }
+    };
+    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
     (!normalized.is_empty()
         && !normalized
             .bytes()
@@ -196,7 +220,7 @@ mod tests {
         assert_eq!(scope.site_id, "shoppr-uk");
         assert_eq!(scope.market, "GB");
         assert_eq!(scope.locale, "en-GB");
-        assert_eq!(scope.request_host, "uk.localhost:8080");
+        assert_eq!(scope.request_host, "uk.localhost");
     }
 
     #[test]
@@ -220,6 +244,34 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, SiteRegistryError::DuplicateHost { .. }));
+    }
+
+    #[test]
+    fn normalizes_transport_ports_without_weakening_host_validation() {
+        let registry = SiteRegistry::new([
+            SiteDefinition::new("ipv4", "http://127.0.0.1", "GB", "en-GB").with_host("127.0.0.1"),
+            SiteDefinition::new("ipv6", "http://[::1]", "GB", "en-GB").with_host("[::1]"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            registry
+                .resolve("127.0.0.1:8088", None, "/", "session-1")
+                .unwrap()
+                .site_id,
+            "ipv4"
+        );
+        assert_eq!(
+            registry
+                .resolve("[::1]:8088", None, "/", "session-1")
+                .unwrap()
+                .site_id,
+            "ipv6"
+        );
+        assert!(matches!(
+            registry.resolve("[::1]:not-a-port", None, "/", "session-1"),
+            Err(SiteRegistryError::UnknownHost { .. })
+        ));
     }
 
     #[cfg(feature = "server")]

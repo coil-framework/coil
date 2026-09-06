@@ -131,6 +131,6 @@ This pair shows:
 
 ## Read Next
 
-- [Extensions And Host APIs](./extensions-and-host-apis.md)
-- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm.md)
-- [Ops Module Reference](../../reference/modules/ops.md)
+- [Extensions And Host APIs](./extensions-and-host-apis/)
+- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm/)
+- [Ops Module Reference](../../reference/modules/ops/)

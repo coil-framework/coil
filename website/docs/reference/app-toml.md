@@ -156,7 +156,7 @@ default_locale = "fr-FR"
 supported_locales = ["en-GB", "fr-FR", "pl-PL"]
 ```
 
-If you are unsure whether you need `[[sites]]` or just more locales, read [Sites, locales, and markets](../core-concepts/sites-locales-and-markets.md).
+If you are unsure whether you need `[[sites]]` or just more locales, read [Sites, locales, and markets](../core-concepts/sites-locales-and-markets/).
 
 ## Extension Installation Example
 
@@ -182,7 +182,7 @@ The extension package itself lives here:
 
 - `apps/shoppr/extensions/shoppr-waitlist-tools/package.toml`
 
-If you need the full extension lifecycle, packaging, or handler model, read [Customer Rust vs third-party WASM](customer-vs-wasm.md).
+If you need the full extension lifecycle, packaging, or handler model, read [Customer Rust vs third-party WASM](../customer-vs-wasm/).
 
 The presence of an extension entry here does not mean that extension automatically shapes every page
 model. Execution still depends on the runtime integration path and the specific handler or host API
@@ -287,7 +287,7 @@ localized_routes = true
 - if `[[sites]]` are present, each site’s locales must stay within the app-wide supported set
 - `localized_routes = true` is the normal choice for public multi-lingual apps
 
-For translation files, fallback chains, and template syntax, read [Internationalisation](internationalization.md).
+For translation files, fallback chains, and template syntax, read [Internationalisation](../internationalization/).
 
 This section sets locale policy. It does not translate templates or content automatically.
 
@@ -371,7 +371,7 @@ asset_roots = ["theme/assets"]
 
 - Keep `template_namespaces` in explicit lookup order
 - `asset_roots` should only list roots that you want Coil to publish
-- theme structure and template lookup are documented in [Theme structure](theme-structure.md)
+- theme structure and template lookup are documented in [Theme structure](../theme-structure/)
 
 ## `[auth]`
 
@@ -406,9 +406,9 @@ Use:
 
 Read next:
 
-- [Auth overview](auth-overview.md)
-- [Auth packages](auth-packages.md)
-- [Custom auth schema guidance](custom-auth-schema.md)
+- [Auth overview](../auth-overview/)
+- [Auth packages](../auth-packages/)
+- [Custom auth schema guidance](../custom-auth-schema/)
 
 ## `[modules]`
 
@@ -435,7 +435,7 @@ Common patterns:
 - narrow the dependency graph later if you need tighter composition control
 - keep `[modules]` aligned with what the customer binary actually links
 
-For module-specific behaviour, use the dedicated module pages under [Official modules](modules.md).
+For module-specific behaviour, use the dedicated module pages under [Official modules](../modules/).
 
 ## `[[extensions]]`
 
@@ -517,8 +517,8 @@ Do not think of `[[content_models]]` as just a field list. Think of it as the pu
 If you add a model such as `lookbook_entry` or `campaign_page`, document its intended editor workflow as well as its field list.
 
 If this boundary is fuzzy, read
-[Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
-and [CMS page builder model](./cms-page-builder-model.md).
+[Content schema vs content instances](../core-concepts/content-schema-vs-content-instances/)
+and [CMS page builder model](./cms-page-builder-model/).
 
 ## `[[customer_migrations]]`
 
@@ -570,11 +570,11 @@ If the change is about environment wiring, secrets, scaling, or infrastructure, 
 
 ## Read Next
 
-- [platform.toml and platform.dev.toml](platform-config.md)
-- [Sites, locales, and markets](../core-concepts/sites-locales-and-markets.md)
-- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
-- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
-- [CMS page builder model](./cms-page-builder-model.md)
-- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model.md)
-- [Theme structure](theme-structure.md)
-- [Official modules](modules.md)
+- [platform.toml and platform.dev.toml](../platform-config/)
+- [Sites, locales, and markets](../core-concepts/sites-locales-and-markets/)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances/)
+- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition/)
+- [CMS page builder model](./cms-page-builder-model/)
+- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model/)
+- [Theme structure](../theme-structure/)
+- [Official modules](../modules/)

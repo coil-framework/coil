@@ -38,5 +38,5 @@ This command updates:
 
 ## Read Next
 
-- [Internationalisation](./internationalization.md)
-- [cargo coil site add](./cargo-coil-site.md)
+- [Internationalisation](./internationalization/)
+- [cargo coil site add](./cargo-coil-site/)

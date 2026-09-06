@@ -105,7 +105,7 @@ Examples:
 
 This is the supported answer to "where does my custom request-time model logic live?"
 
-For the exact API, read [Render model hooks](../reference/render-model-hooks.md).
+For the exact API, read [Render model hooks](../reference/render-model-hooks/).
 
 ## 5. Template Rendering
 
@@ -234,12 +234,12 @@ the template contract.
 
 ## Related Concepts
 
-- [Content schema vs content instances](./content-schema-vs-content-instances.md)
-- [Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections.md)
-- [Request and render lifecycle](./request-and-render-lifecycle.md)
+- [Content schema vs content instances](./content-schema-vs-content-instances/)
+- [Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections/)
+- [Request and render lifecycle](./request-and-render-lifecycle/)
 
 ## Reference Pages
 
-- [Template models](../reference/template-models.md)
-- [Render model hooks](../reference/render-model-hooks.md)
-- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)
+- [Template models](../reference/template-models/)
+- [Render model hooks](../reference/render-model-hooks/)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks/)

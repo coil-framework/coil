@@ -147,8 +147,8 @@ These are the app-visible surfaces that make the extension contributions legible
 
 The general host API and grant model is documented in:
 
-- [WASM Host APIs](../../reference/wasm-host-apis.md)
-- [Extension Package Format](../../reference/extension-package-format.md)
+- [WASM Host APIs](../../reference/wasm-host-apis/)
+- [Extension Package Format](../../reference/extension-package-format/)
 
 Gitly’s handlers use empty grant sets intentionally. That keeps the demo focused on slot design and
 package binding instead of grant complexity.
@@ -173,6 +173,6 @@ package binding instead of grant complexity.
 
 ## Read Next
 
-- [API And Background Work](./api-and-background-work.md)
-- [Build And Deploy](./build-and-deploy.md)
-- [Extension Package Format](../../reference/extension-package-format.md)
+- [API And Background Work](./api-and-background-work/)
+- [Build And Deploy](./build-and-deploy/)
+- [Extension Package Format](../../reference/extension-package-format/)

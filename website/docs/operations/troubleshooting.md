@@ -243,6 +243,6 @@ During troubleshooting:
 
 ## What To Read Next
 
-- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
-- [Webhooks and integrations](webhooks-and-integrations.md)
-- [Database migrations](database-migrations.md)
+- [Health, readiness, and maintenance mode](../health-readiness-and-maintenance-mode/)
+- [Webhooks and integrations](../webhooks-and-integrations/)
+- [Database migrations](../database-migrations/)

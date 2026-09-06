@@ -108,10 +108,10 @@ crates such as `coil-rs` and `coil-customer-sdk` to be available on crates.io.
 
 ## Command Map
 
-- [cargo coil new](./cargo-coil-new.md)
-- [cargo coil init](./cargo-coil-init.md)
-- [cargo coil apply](./cargo-coil-apply.md)
-- [cargo coil doctor](./cargo-coil-doctor.md)
-- [cargo coil module add and remove](./cargo-coil-module.md)
-- [cargo coil site add](./cargo-coil-site.md)
-- [cargo coil locale add](./cargo-coil-locale.md)
+- [cargo coil new](./cargo-coil-new/)
+- [cargo coil init](./cargo-coil-init/)
+- [cargo coil apply](./cargo-coil-apply/)
+- [cargo coil doctor](./cargo-coil-doctor/)
+- [cargo coil module add and remove](./cargo-coil-module/)
+- [cargo coil site add](./cargo-coil-site/)
+- [cargo coil locale add](./cargo-coil-locale/)

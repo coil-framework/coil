@@ -509,4 +509,4 @@ Then verify:
 
 ## What To Read Next
 
-- [Add Authentication and Customer Accounts](add-authentication-and-customer-accounts.md)
+- [Add Authentication and Customer Accounts](../add-authentication-and-customer-accounts/)

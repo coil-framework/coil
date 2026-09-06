@@ -264,4 +264,4 @@ cargo run -p tutorial-app-bin -- serve
 
 ## What To Read Next
 
-- [Add Dynamic Blocks](add-dynamic-blocks.md)
+- [Add Dynamic Blocks](../add-dynamic-blocks/)

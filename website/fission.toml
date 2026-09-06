@@ -1,0 +1,53 @@
+targets = ["static-site"]
+
+[app]
+name = "Coil"
+
+[site]
+title = "Coil"
+description = "A Fission-native Rust product framework for public, interactive, and operational web surfaces."
+base_url = "https://coil.rs"
+out_dir = "dist"
+default_locale = "en"
+favicon = "img/favicon.svg"
+asset_dirs = ["static"]
+css_files = ["src/site.css"]
+generate_sitemap = true
+generate_robots = true
+
+[site.search]
+enabled = true
+min_token_len = 2
+
+[site.code_highlighting]
+enabled = true
+
+[[site.nav]]
+title = "Start"
+href = "/docs/getting-started/quickstart/"
+
+[[site.nav]]
+title = "Concepts"
+href = "/docs/core-concepts/"
+
+[[site.nav]]
+title = "Reference"
+href = "/docs/reference/overview/"
+
+[[site.nav]]
+title = "Architecture"
+href = "/architecture/03-product-shape-core-official-modules-customer-apps/"
+
+[[site.nav]]
+title = "GitHub"
+href = "https://github.com/coil-framework/coil"
+
+[[site.routes]]
+kind = "content"
+path = "/docs"
+source = "docs"
+
+[[site.routes]]
+kind = "content"
+path = "/architecture"
+source = "../docs/design"

@@ -158,5 +158,5 @@ Shoppr is the canonical example:
 
 ## Read Next
 
-- [Media](./media.md)
-- [Shoppr Custom Pages And CMS](../../use-cases/shoppr/custom-pages-and-cms.md)
+- [Media](./media/)
+- [Shoppr Custom Pages And CMS](../../use-cases/shoppr/custom-pages-and-cms/)

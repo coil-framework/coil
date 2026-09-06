@@ -265,4 +265,4 @@ Then verify:
 
 ## What To Read Next
 
-- [Add a Real Content Model](add-a-real-content-model.md)
+- [Add a Real Content Model](../add-a-real-content-model/)

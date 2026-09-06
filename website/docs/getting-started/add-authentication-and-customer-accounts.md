@@ -448,4 +448,4 @@ Then verify:
 
 ## What To Read Next
 
-- [Add Memberships and Audience Gating](add-memberships-and-audience-gating.md)
+- [Add Memberships and Audience Gating](../add-memberships-and-audience-gating/)

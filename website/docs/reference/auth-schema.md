@@ -222,5 +222,5 @@ Keep changes small. Small auth changes are easier to explain, test, and roll bac
 
 ## Read Next
 
-- [Auth Packages](./auth-packages.md)
-- [Custom Auth Schema Guidance](./custom-auth-schema.md)
+- [Auth Packages](./auth-packages/)
+- [Custom Auth Schema Guidance](./custom-auth-schema/)

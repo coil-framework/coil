@@ -127,7 +127,7 @@ A module is linked when the customer binary has the code available at build time
 
 A module is enabled when the customer app manifest includes it under:
 
-- [modules.enabled in `app.toml`](../reference/app-toml.md)
+- [modules.enabled in `app.toml`](../reference/app-toml/)
 
 ### What Happens If They Drift
 
@@ -200,7 +200,7 @@ It is a convenience battery, not the only valid composition story.
 
 ## Read Next
 
-- [Request and render lifecycle](request-and-render-lifecycle.md)
-- [Customer apps vs official modules](customer-apps-vs-official-modules.md)
-- [Composition and coil](../reference/composition.md)
-- [Official modules](../reference/modules.md)
+- [Request and render lifecycle](../request-and-render-lifecycle/)
+- [Customer apps vs official modules](../customer-apps-vs-official-modules/)
+- [Composition and coil](../reference/composition/)
+- [Official modules](../reference/modules/)

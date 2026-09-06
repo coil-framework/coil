@@ -76,5 +76,5 @@ cargo run -p my-store -- serve
 
 ## Read Next
 
-- [cargo coil init](./cargo-coil-init.md)
-- [cargo coil apply](./cargo-coil-apply.md)
+- [cargo coil init](./cargo-coil-init/)
+- [cargo coil apply](./cargo-coil-apply/)

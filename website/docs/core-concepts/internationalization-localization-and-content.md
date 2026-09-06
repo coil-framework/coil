@@ -221,8 +221,8 @@ boundary.
 
 ## What Should I Read Next?
 
-- [Internationalisation](../reference/internationalization.md)
-- [SEO](../reference/seo.md)
-- [Sites, Locales, And Markets](./sites-locales-and-markets.md)
+- [Internationalisation](../reference/internationalization/)
+- [SEO](../reference/seo/)
+- [Sites, Locales, And Markets](./sites-locales-and-markets/)
 - `apps/shoppr/app.toml`
 - `apps/gitly/theme/assets/site.js`

@@ -1,0 +1,15 @@
+[package]
+name = "coil-website"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+fission = { workspace = true, features = ["site"] }
+
+[[bin]]
+name = "coil-website"
+path = "src/main.rs"

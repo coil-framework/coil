@@ -161,6 +161,6 @@ That is the pattern to copy for your own customer app.
 
 ## Read Next
 
-- [Platform Config](./platform-config.md)
-- [CLI Commands](./cli-commands.md)
-- [Gitly Build And Deploy](../use-cases/gitly/build-and-deploy.md)
+- [Platform Config](./platform-config/)
+- [CLI Commands](./cli-commands/)
+- [Gitly Build And Deploy](../use-cases/gitly/build-and-deploy/)

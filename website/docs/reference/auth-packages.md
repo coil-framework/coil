@@ -166,7 +166,7 @@ If those disagree, the app/runtime contract is inconsistent.
 
 `model.auth` defines resource types, relations, and derived permissions.
 
-See [Auth Schema](./auth-schema.md) for the syntax and constraints.
+See [Auth Schema](./auth-schema/) for the syntax and constraints.
 
 ## `capabilities.toml`
 
@@ -261,5 +261,5 @@ That is the shape to copy first unless you have a strong reason to do something 
 
 ## Read Next
 
-- [Auth Schema](./auth-schema.md)
-- [Custom Auth Schema Guidance](./custom-auth-schema.md)
+- [Auth Schema](./auth-schema/)
+- [Custom Auth Schema Guidance](./custom-auth-schema/)

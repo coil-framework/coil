@@ -262,7 +262,7 @@ If a package starts looking like a replacement application backend, it is crossi
 - Do not treat `target` as a free-form comment.
   - it must match the semantics of the selected extension point
 - Do not use WASM for first-party customer logic that should be linked Rust.
-  - use [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md) to choose the boundary
+  - use [Customer Rust Vs Third-Party WASM](./customer-vs-wasm/) to choose the boundary
 
 ## Full Implementation
 
@@ -289,7 +289,7 @@ App loaders:
 
 ## Read Next
 
-- [WASM Host APIs](./wasm-host-apis.md)
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
-- [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis.md)
-- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions.md)
+- [WASM Host APIs](./wasm-host-apis/)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm/)
+- [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis/)
+- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions/)

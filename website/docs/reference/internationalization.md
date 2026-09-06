@@ -147,7 +147,7 @@ that surface.
 
 ## Read Next
 
-- [SEO](./seo.md)
-- [Template Models](./template-models.md)
-- [Gitly Theming, Localization, And Accessibility](../use-cases/gitly/theming-localization-and-accessibility.md)
-- [Sites, locales, and markets](../core-concepts/sites-locales-and-markets.md)
+- [SEO](./seo/)
+- [Template Models](./template-models/)
+- [Gitly Theming, Localization, And Accessibility](../use-cases/gitly/theming-localization-and-accessibility/)
+- [Sites, locales, and markets](../core-concepts/sites-locales-and-markets/)

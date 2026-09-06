@@ -140,6 +140,6 @@ That is why the public jobs operator learning path still spans:
 
 ## Read Next
 
-- [Shoppr Observability And Audit](./observability-and-audit.md)
-- [Jobs and schedulers](../../operations/jobs-and-schedulers.md)
-- [CLI Commands](../../reference/cli-commands.md)
+- [Shoppr Observability And Audit](./observability-and-audit/)
+- [Jobs and schedulers](../../operations/jobs-and-schedulers/)
+- [CLI Commands](../../reference/cli-commands/)

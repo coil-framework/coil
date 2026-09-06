@@ -140,7 +140,7 @@ Choose selective composition if:
 
 ## Read Next
 
-- [Official Modules](./modules.md)
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
-- [Shoppr Overview](../use-cases/shoppr/overview.md)
-- [Gitly Overview](../use-cases/gitly/overview.md)
+- [Official Modules](./modules/)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm/)
+- [Shoppr Overview](../use-cases/shoppr/overview/)
+- [Gitly Overview](../use-cases/gitly/overview/)

@@ -95,6 +95,6 @@ Shoppr is the concrete example to use when making that call.
 
 ## Read Next
 
-- [Shoppr Overview](./overview.md)
-- [Sites, Locales, And Markets](../../core-concepts/sites-locales-and-markets.md)
-- [Internationalisation Reference](../../reference/internationalization.md)
+- [Shoppr Overview](./overview/)
+- [Sites, Locales, And Markets](../../core-concepts/sites-locales-and-markets/)
+- [Internationalisation Reference](../../reference/internationalization/)

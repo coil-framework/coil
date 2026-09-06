@@ -33,6 +33,7 @@ members = [
     "crates/coil-template",
     "crates/coil-tls",
     "crates/coil-wasm",
+    "website",
 ]
 exclude = ["third_party/zanzibar"]
 

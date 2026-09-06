@@ -133,7 +133,7 @@ Important current limitation:
 So document and operate customer-specific schema changes carefully, but do not assume there is a
 fully finished example app walkthrough for that lane yet.
 
-For more detail, read [Database migrations](database-migrations.md).
+For more detail, read [Database migrations](../database-migrations/).
 
 ## Asset Publication
 
@@ -145,7 +145,7 @@ Concrete examples:
 - Shoppr local dev publishes assets through `cargo run -p shoppr -- assets publish`
 - Shoppr and Gitly both set `cdn_base_url` in `platform.dev.toml` and `platform.toml`
 
-Read [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md) before treating
+Read [Asset publication and CDN delivery](../asset-publication-and-cdn-delivery/) before treating
 frontend delivery as part of startup.
 
 ## Production Deployment Example: Shoppr
@@ -233,6 +233,6 @@ will be poor.
 
 ## What To Read Next
 
-- [Database migrations](database-migrations.md)
-- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
-- [Cache, TLS, cutover, and rollback](cache-tls-cutover-and-rollback.md)
+- [Database migrations](../database-migrations/)
+- [Asset publication and CDN delivery](../asset-publication-and-cdn-delivery/)
+- [Cache, TLS, cutover, and rollback](../cache-tls-cutover-and-rollback/)

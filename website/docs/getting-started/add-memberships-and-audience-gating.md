@@ -641,4 +641,4 @@ What this chapter proves:
 The next chapter uses this same entitlement-aware foundation to make event visibility and timeslot
 surfaces membership-aware where needed.
 
-- [Add Events and Timeslots](add-events-and-timeslots.md)
+- [Add Events and Timeslots](../add-events-and-timeslots/)

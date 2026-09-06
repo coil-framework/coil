@@ -105,6 +105,6 @@ A webhook system that cannot tolerate retries is not production-ready.
 
 ## What To Read Next
 
-- [Configuration and secrets](configuration-and-secrets.md)
-- [Observability, monitoring, and audit](observability.md)
-- [Troubleshooting](troubleshooting.md)
+- [Configuration and secrets](../configuration-and-secrets/)
+- [Observability, monitoring, and audit](../observability/)
+- [Troubleshooting](../troubleshooting/)

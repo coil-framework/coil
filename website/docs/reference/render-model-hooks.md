@@ -13,7 +13,7 @@ This is the supported answer to both of these needs:
 - merge customer-owned fields into a shared runtime object such as `page`
 
 If you need the full request-time context first, read
-[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md).
+[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition/).
 
 ## What Problem This Solves
 
@@ -497,11 +497,11 @@ Use `merge(...)` when:
 
 ## What To Read Next
 
-- [Linked Rust Hook APIs](./linked-rust-hook-apis.md)
-- [Template Models](./template-models.md)
-- [Template Language](./template-language.md)
-- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle.md)
-- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
-- [Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections.md)
-- [CMS page builder model](./cms-page-builder-model.md)
-- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)
+- [Linked Rust Hook APIs](./linked-rust-hook-apis/)
+- [Template Models](./template-models/)
+- [Template Language](./template-language/)
+- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle/)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances/)
+- [Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections/)
+- [CMS page builder model](./cms-page-builder-model/)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks/)

@@ -237,6 +237,6 @@ That validates the customer app and installed extension configuration before you
 
 ## Read Next
 
-- [Extension Package Format](./extension-package-format.md)
-- [WASM Host APIs](./wasm-host-apis.md)
-- [WASM Host Service Examples](./wasm-host-service-examples.md)
+- [Extension Package Format](./extension-package-format/)
+- [WASM Host APIs](./wasm-host-apis/)
+- [WASM Host Service Examples](./wasm-host-service-examples/)

@@ -513,7 +513,7 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Template Models](./template-models.md)
-- [Theme Structure](./theme-structure.md)
-- [Internationalisation](./internationalization.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
+- [Template Models](./template-models/)
+- [Theme Structure](./theme-structure/)
+- [Internationalisation](./internationalization/)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets/)

@@ -29,47 +29,47 @@ Use it when you already know roughly what you are trying to do and need the conc
 
 If you are new to the idea, start in:
 
-- [Core Concepts](../core-concepts/index.md)
+- [Core Concepts](../core-concepts/index/)
 
 If you want a worked example, jump to:
 
-- [Shoppr use cases](../use-cases/shoppr/overview.md)
-- [Gitly use cases](../use-cases/gitly/overview.md)
+- [Shoppr use cases](../use-cases/shoppr/overview/)
+- [Gitly use cases](../use-cases/gitly/overview/)
 
 ## What Lives Here
 
 ### Product And Runtime Configuration
 
-- [app.toml](./app-toml.md)
-- [platform.toml And platform.dev.toml](./platform-config.md)
+- [app.toml](./app-toml/)
+- [platform.toml And platform.dev.toml](./platform-config/)
 
 Use these when you need to know exactly which blocks exist, what keys are supported, and how product composition differs from runtime operations.
 
 ### Auth
 
-- [Auth overview](./auth-overview.md)
-- [Zanzibar and Coil auth](./auth-zanzibar.md)
-- [Auth schema](./auth-schema.md)
-- [Auth packages](./auth-packages.md)
-- [Custom auth schema guidance](./custom-auth-schema.md)
+- [Auth overview](./auth-overview/)
+- [Zanzibar and Coil auth](./auth-zanzibar/)
+- [Auth schema](./auth-schema/)
+- [Auth packages](./auth-packages/)
+- [Custom auth schema guidance](./custom-auth-schema/)
 
 Use this subsection when you need to understand how Coil expresses authorisation and how to extend or replace the shipped auth model.
 
 ### Rendering, Themes, Locales, Accessibility, And SEO
 
-- [Template Language](./template-language.md)
-- [Theme Structure](./theme-structure.md)
-- [Internationalisation](./internationalization.md)
-- [Accessibility](./accessibility.md)
-- [SEO](./seo.md)
+- [Template Language](./template-language/)
+- [Theme Structure](./theme-structure/)
+- [Internationalisation](./internationalization/)
+- [Accessibility](./accessibility/)
+- [SEO](./seo/)
 
 Use these when you need the exact template syntax, theme contract, locale wiring, accessibility expectations, or SEO controls.
 
 ### Official Batteries And Composition
 
-- [Official modules](./modules.md)
-- [Composition and coil](./composition.md)
-- [Customer Rust vs third-party WASM](./customer-vs-wasm.md)
+- [Official modules](./modules/)
+- [Composition and coil](./composition/)
+- [Customer Rust vs third-party WASM](./customer-vs-wasm/)
 
 Use these when you need to know what the official batteries provide, how to compose them, and how linked customer code differs from runtime-installed extensions.
 

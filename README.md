@@ -17,7 +17,7 @@ But Coil is not ecommerce-only. The same platform shape also powers non-commerce
 
 ## Why Developers Reach For Coil
 
-- HTML-first by default, with progressive enhancement layered on instead of forcing a SPA-first architecture.
+- Fission-native SSR by default, with focused islands and full Web applications where the product earns them.
 - Multi-site, multi-locale, and market-aware routing built into the product model instead of bolted on later.
 - First-party Rust extension model for customer-owned business logic, plus WASM for bounded third-party extensions.
 - Official batteries for CMS, commerce, memberships, events, admin, media, auth, jobs, and ops.
@@ -27,7 +27,7 @@ But Coil is not ecommerce-only. The same platform shape also powers non-commerce
 ## What You Get
 
 - A customer-root Rust app model instead of a framework that stops at HTTP handlers.
-- HTML-first rendering with progressive enhancement layered on where it adds value.
+- One Fission action/reducer/job model across SSR, islands, and full Web surfaces.
 - Multi-site, multi-locale, and market-aware product boundaries without forcing a headless architecture.
 - Built-in batteries for CMS, commerce, events, memberships, media, admin, jobs, auth, and ops.
 - A first-party path for customer-owned Rust business logic and a separate WASM path for bounded third-party extensions.
@@ -35,7 +35,7 @@ But Coil is not ecommerce-only. The same platform shape also powers non-commerce
 ## What Is In This Repo
 
 - `crates/`
-  Coil core crates and official modules.
+  Coil domain crates, official modules, and the Fission-native application foundation.
 - `apps/shoppr/`
   The reference multi-market ecommerce starter.
 - `apps/gitly/`
@@ -43,7 +43,7 @@ But Coil is not ecommerce-only. The same platform shape also powers non-commerce
 - `docs/design/`
   Architecture records and internal design chapters.
 - `website/`
-  The public Docusaurus documentation site.
+  The public Fission static site and documentation.
 
 ## Start In Minutes
 
@@ -67,9 +67,7 @@ Then open:
 ### 2. Read The Public Docs
 
 ```bash
-cd website
-npm install
-npm run start
+cargo run -p coil-website -- serve --project-dir website --no-open
 ```
 
 That gives you:
@@ -93,7 +91,8 @@ If a developer opens this repo and sees only abstractions, the framework loses t
 
 Coil is intentionally split into clear layers:
 
-- Coil core: runtime, routing, storage, cache, auth execution, jobs, observability, TLS, rendering.
+- Fission: rendering, retained widgets, routing, synchronous reducers, awaited jobs, SSR, islands, and Web shells.
+- Coil core: sites, markets, product domains, auth policy, storage, cache policy, jobs, observability, and operations.
 - Official modules: CMS, commerce, memberships, events, admin, media, ops, and other reusable batteries.
 - Customer apps: branding, templates, configuration, auth mappings, Rust business logic, and optional WASM extensions.
 

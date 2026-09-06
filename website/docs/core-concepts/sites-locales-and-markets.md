@@ -180,7 +180,7 @@ That creates unnecessary host and routing complexity.
 
 ## Read Next
 
-- [Request and render lifecycle](request-and-render-lifecycle.md)
-- [app.toml](../reference/app-toml.md)
-- [Shoppr use case overview](../use-cases/shoppr/overview.md)
-- [Gitly use case overview](../use-cases/gitly/overview.md)
+- [Request and render lifecycle](../request-and-render-lifecycle/)
+- [app.toml](../reference/app-toml/)
+- [Shoppr use case overview](../use-cases/shoppr/overview/)
+- [Gitly use case overview](../use-cases/gitly/overview/)

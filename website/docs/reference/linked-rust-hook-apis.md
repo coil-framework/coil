@@ -227,7 +227,7 @@ impl RenderModelHooks for CustomerBackend {
 }
 ```
 
-Read the full detailed contract in [Render Model Hooks](./render-model-hooks.md).
+Read the full detailed contract in [Render Model Hooks](./render-model-hooks/).
 
 ## Verified Webhook Hooks
 
@@ -296,8 +296,8 @@ Those are intentionally different trust boundaries.
 
 ## What To Read Next
 
-- [Render Model Hooks](./render-model-hooks.md)
-- [Template Models](./template-models.md)
-- [Template Language](./template-language.md)
-- [Customer Rust vs third-party WASM](./customer-vs-wasm.md)
-- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle.md)
+- [Render Model Hooks](./render-model-hooks/)
+- [Template Models](./template-models/)
+- [Template Language](./template-language/)
+- [Customer Rust vs third-party WASM](./customer-vs-wasm/)
+- [Request And Render Lifecycle](../core-concepts/request-and-render-lifecycle/)

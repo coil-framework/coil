@@ -134,6 +134,6 @@ Then adapt:
 
 ## Read Next
 
-- [Storefront Structure](./storefront-structure.md)
-- [Custom Pages And CMS](./custom-pages-and-cms.md)
-- [Commerce Module Reference](../../reference/modules/commerce.md)
+- [Storefront Structure](./storefront-structure/)
+- [Custom Pages And CMS](./custom-pages-and-cms/)
+- [Commerce Module Reference](../../reference/modules/commerce/)

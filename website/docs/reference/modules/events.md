@@ -114,5 +114,5 @@ Shoppr is the main example because it enables `events` alongside commerce and me
 
 ## Read Next
 
-- [Memberships](./memberships.md)
-- [Ops](./ops.md)
+- [Memberships](./memberships/)
+- [Ops](./ops/)

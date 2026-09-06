@@ -110,6 +110,6 @@ That is not what this app is demonstrating.
 
 ## Read Next
 
-- [Internationalisation](../../reference/internationalization.md)
-- [Theme Structure](../../reference/theme-structure.md)
-- [Accessibility](../../reference/accessibility.md)
+- [Internationalisation](../../reference/internationalization/)
+- [Theme Structure](../../reference/theme-structure/)
+- [Accessibility](../../reference/accessibility/)

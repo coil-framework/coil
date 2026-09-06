@@ -8,8 +8,15 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    env:
+      FISSION_REV: 9e2e3139e48afd05e23fa92d65be82e531772cea
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the Fission base
+        run: |
+          mkdir -p "$RUNNER_WORKSPACE/../fission"
+          git clone --filter=blob:none --branch gaming --single-branch https://github.com/fission-ui/fission.git "$RUNNER_WORKSPACE/../fission/fission"
+          git -C "$RUNNER_WORKSPACE/../fission/fission" checkout "$FISSION_REV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test core workspace
@@ -29,16 +36,16 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    env:
+      FISSION_REV: 9e2e3139e48afd05e23fa92d65be82e531772cea
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: website/package-lock.json
-      - name: Install docs dependencies
-        run: npm ci
-        working-directory: website
+      - name: Check out the Fission base
+        run: |
+          mkdir -p "$RUNNER_WORKSPACE/../fission"
+          git clone --filter=blob:none --branch gaming --single-branch https://github.com/fission-ui/fission.git "$RUNNER_WORKSPACE/../fission/fission"
+          git -C "$RUNNER_WORKSPACE/../fission/fission" checkout "$FISSION_REV"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build docs
-        run: npm run build
-        working-directory: website
+        run: cargo run -p coil-website -- build --project-dir website

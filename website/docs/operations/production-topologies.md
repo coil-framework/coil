@@ -125,6 +125,6 @@ Coil's site model exists to avoid that drift.
 
 ## What To Read Next
 
-- [Project organization](project-organization.md)
-- [Build and deploy](build-and-deploy.md)
-- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
+- [Project organization](../project-organization/)
+- [Build and deploy](../build-and-deploy/)
+- [Asset publication and CDN delivery](../asset-publication-and-cdn-delivery/)

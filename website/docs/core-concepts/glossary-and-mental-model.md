@@ -49,9 +49,9 @@ Core should not quietly grow product batteries. If a capability looks like reusa
 
 Where to see it in practice:
 
-- [Runtime and module composition](runtime-and-module-composition.md)
-- [Build and deploy](../operations/build-and-deploy.md)
-- [Official modules](../reference/modules.md)
+- [Runtime and module composition](../runtime-and-module-composition/)
+- [Build and deploy](../operations/build-and-deploy/)
+- [Official modules](../reference/modules/)
 
 ### Official module
 
@@ -61,9 +61,9 @@ Modules are linked natively, versioned explicitly, and composed into the custome
 
 Where to see it in practice:
 
-- [Customer apps vs official modules](customer-apps-vs-official-modules.md)
-- [Official modules](../reference/modules.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
+- [Customer apps vs official modules](../customer-apps-vs-official-modules/)
+- [Official modules](../reference/modules/)
+- [Shoppr overview](../use-cases/shoppr/overview/)
 
 ### Customer application
 
@@ -80,10 +80,10 @@ Shoppr and Gitly are both customer applications.
 
 Where to see it in practice:
 
-- [Customer-root workspace](customer-root-workspace.md)
-- [Customer project layout](../getting-started/customer-project-layout.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
+- [Customer-root workspace](../customer-root-workspace/)
+- [Customer project layout](../getting-started/customer-project-layout/)
+- [Shoppr overview](../use-cases/shoppr/overview/)
+- [Gitly overview](../use-cases/gitly/overview/)
 
 ### Linked customer Rust
 
@@ -91,9 +91,9 @@ This is customer-owned Rust logic compiled into the application through stable p
 
 Where to see it in practice:
 
-- [Linked Rust backends](../getting-started/linked-rust-backends.md)
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
+- [Linked Rust backends](../getting-started/linked-rust-backends/)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)
+- [Gitly overview](../use-cases/gitly/overview/)
 
 ### Third-party extension
 
@@ -101,9 +101,9 @@ This is lower-trust or externally supplied functionality that runs through bound
 
 Where to see it in practice:
 
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
-- [Jobs and schedulers](../operations/jobs-and-schedulers.md)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)
+- [Gitly overview](../use-cases/gitly/overview/)
+- [Jobs and schedulers](../operations/jobs-and-schedulers/)
 
 ### Site
 
@@ -111,9 +111,9 @@ A site is a first-class delivery unit inside a customer app. Different sites can
 
 Where to see it in practice:
 
-- [Sites, locales, and markets](sites-locales-and-markets.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Configuration and secrets](../operations/configuration-and-secrets.md)
+- [Sites, locales, and markets](../sites-locales-and-markets/)
+- [Shoppr overview](../use-cases/shoppr/overview/)
+- [Configuration and secrets](../operations/configuration-and-secrets/)
 
 ### Locale
 
@@ -121,9 +121,9 @@ Locale is a request-level concern, not just a template string. It affects routin
 
 Where to see it in practice:
 
-- [Sites, locales, and markets](sites-locales-and-markets.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
-- [Internationalisation](../reference/internationalization.md)
+- [Sites, locales, and markets](../sites-locales-and-markets/)
+- [Gitly overview](../use-cases/gitly/overview/)
+- [Internationalisation](../reference/internationalization/)
 
 ### Market
 
@@ -131,8 +131,8 @@ Market is a commerce-facing concept about selling conditions such as assortment,
 
 Where to see it in practice:
 
-- [Sites, locales, and markets](sites-locales-and-markets.md)
-- [Shoppr catalog and merchandising](../use-cases/shoppr/catalog-and-merchandising.md)
+- [Sites, locales, and markets](../sites-locales-and-markets/)
+- [Shoppr catalog and merchandising](../use-cases/shoppr/catalog-and-merchandising/)
 
 ## How The Pieces Fit Together
 
@@ -150,16 +150,16 @@ That is the mental model to keep in your head while reading the rest of the docs
 If a term here is still too abstract, jump directly to one of these:
 
 - "How does the app get assembled?":
-  [Customer-root workspace](customer-root-workspace.md),
-  [Customer project layout](../getting-started/customer-project-layout.md)
+  [Customer-root workspace](../customer-root-workspace/),
+  [Customer project layout](../getting-started/customer-project-layout/)
 - "How does a request actually move through the runtime?":
-  [Request and render lifecycle](request-and-render-lifecycle.md)
+  [Request and render lifecycle](../request-and-render-lifecycle/)
 - "Where do sites and locales become real runtime behaviour?":
-  [Sites, locales, and markets](sites-locales-and-markets.md),
-  [Configuration and secrets](../operations/configuration-and-secrets.md)
+  [Sites, locales, and markets](../sites-locales-and-markets/),
+  [Configuration and secrets](../operations/configuration-and-secrets/)
 - "Where is the customer/backend boundary explained concretely?":
-  [Linked Rust backends](../getting-started/linked-rust-backends.md),
-  [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
+  [Linked Rust backends](../getting-started/linked-rust-backends/),
+  [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)
 
 ## Common Mistakes
 
@@ -177,8 +177,8 @@ In Coil they are runtime concepts, not just presentation details.
 
 ## What To Read Next
 
-- [Customer-root workspace](customer-root-workspace.md)
-- [Runtime and module composition](runtime-and-module-composition.md)
-- [Customer apps vs official modules](customer-apps-vs-official-modules.md)
-- [Shoppr overview](../use-cases/shoppr/overview.md)
-- [Gitly overview](../use-cases/gitly/overview.md)
+- [Customer-root workspace](../customer-root-workspace/)
+- [Runtime and module composition](../runtime-and-module-composition/)
+- [Customer apps vs official modules](../customer-apps-vs-official-modules/)
+- [Shoppr overview](../use-cases/shoppr/overview/)
+- [Gitly overview](../use-cases/gitly/overview/)

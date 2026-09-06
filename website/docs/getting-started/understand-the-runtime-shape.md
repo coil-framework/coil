@@ -492,4 +492,4 @@ At this point you should be able to answer:
 
 ## What To Read Next
 
-- [Build the Base Theme](build-the-base-theme.md)
+- [Build the Base Theme](../build-the-base-theme/)

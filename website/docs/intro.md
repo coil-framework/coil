@@ -18,7 +18,7 @@ That makes Coil a better fit for Rust web developers who want to build a product
 Coil gives you:
 
 - a customer-root workspace model, where the customer binary owns composition
-- HTML-first rendering with progressive enhancement
+- Fission SSR with focused islands and full Web applications where the workflow requires them
 - first-party official modules for common product batteries such as CMS, commerce, memberships, admin, media, and ops
 - a stable linked Rust path for customer-owned backend logic
 - a bounded WASM path for third-party or lower-trust extensions
@@ -38,17 +38,17 @@ Coil is probably the wrong choice if you want:
 
 If you are evaluating Coil for the first time:
 
-1. Start with the [Quickstart](getting-started/quickstart.md).
-2. Read the [Core Concepts overview](core-concepts/index.md).
+1. Start with the [Quickstart](/docs/getting-started/quickstart/).
+2. Read the [Core Concepts overview](/docs/core-concepts/).
 3. Follow the concept pages in order if you want the full mental model.
 4. Use Shoppr and Gitly as concrete reference applications while reading.
 
 If you are already comfortable with Rust web stacks and want the shortest path to understanding Coil's architecture:
 
-1. Read [Glossary and mental model](core-concepts/glossary-and-mental-model.md).
-2. Read [Customer-root workspace](core-concepts/customer-root-workspace.md).
-3. Read [Runtime and module composition](core-concepts/runtime-and-module-composition.md).
-4. Read [Request and render lifecycle](core-concepts/request-and-render-lifecycle.md).
+1. Read [Glossary and mental model](/docs/core-concepts/glossary-and-mental-model/).
+2. Read [Customer-root workspace](/docs/core-concepts/customer-root-workspace/).
+3. Read [Runtime and module composition](/docs/core-concepts/runtime-and-module-composition/).
+4. Read [Request and render lifecycle](/docs/core-concepts/request-and-render-lifecycle/).
 
 ## Two Example Apps
 
@@ -61,7 +61,7 @@ Those apps are not marketing demos bolted onto the side. They are the fastest wa
 
 ## Where To Go Next
 
-- [Quickstart](getting-started/quickstart.md) for a practical first run
-- [Customer project layout](getting-started/customer-project-layout.md) for the repository shape
-- [Linked Rust backends](getting-started/linked-rust-backends.md) for the supported customization model
-- [Core Concepts](core-concepts/index.md) for the architecture narrative
+- [Quickstart](/docs/getting-started/quickstart/) for a practical first run
+- [Customer project layout](/docs/getting-started/customer-project-layout/) for the repository shape
+- [Linked Rust backends](/docs/getting-started/linked-rust-backends/) for the supported customization model
+- [Core Concepts](/docs/core-concepts/) for the architecture narrative

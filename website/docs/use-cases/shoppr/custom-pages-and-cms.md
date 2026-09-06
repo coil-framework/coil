@@ -122,6 +122,6 @@ If you want the full Shoppr CMS implementation after learning the pattern:
 
 ## Read Next
 
-- [Catalog And Merchandising](./catalog-and-merchandising.md)
-- [CMS Module Reference](../../reference/modules/cms.md)
-- [SEO Reference](../../reference/seo.md)
+- [Catalog And Merchandising](./catalog-and-merchandising/)
+- [CMS Module Reference](../../reference/modules/cms/)
+- [SEO Reference](../../reference/seo/)

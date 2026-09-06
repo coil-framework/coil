@@ -116,5 +116,5 @@ cargo run -p coil-cli -- import cutover imports/wordpress-events.toml \
 
 ## Read Next
 
-- [Migration Files And Ownership](./migration-files-and-ownership.md)
-- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets.md)
+- [Migration Files And Ownership](./migration-files-and-ownership/)
+- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets/)

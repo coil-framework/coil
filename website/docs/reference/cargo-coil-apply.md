@@ -37,4 +37,4 @@ Use `doctor` when you want inspection first, then `apply` when you want to recon
 
 ## Read Next
 
-- [cargo coil doctor](./cargo-coil-doctor.md)
+- [cargo coil doctor](./cargo-coil-doctor/)

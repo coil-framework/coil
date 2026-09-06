@@ -311,4 +311,4 @@ And answer these questions from the code in front of you:
 
 ## What To Read Next
 
-- [Create the Project](create-the-project.md)
+- [Create the Project](../create-the-project/)

@@ -273,8 +273,8 @@ If you think only in terms of route path strings, multi-site behaviour will feel
 
 ## Read Next
 
-- [Sites, locales, and markets](sites-locales-and-markets.md)
-- [Template Models](../reference/template-models.md)
-- [Theme structure](../reference/theme-structure.md)
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
-- [Reference overview](../reference/overview.md)
+- [Sites, locales, and markets](../sites-locales-and-markets/)
+- [Template Models](../reference/template-models/)
+- [Theme structure](../reference/theme-structure/)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)
+- [Reference overview](../reference/overview/)

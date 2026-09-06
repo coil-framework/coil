@@ -64,13 +64,13 @@ Use the auth reference when you need to understand:
 
 Start here:
 
-1. [Zanzibar And Core Auth](./auth-zanzibar.md)
+1. [Zanzibar And Core Auth](./auth-zanzibar/)
    - read this if you need the mental model
-2. [Auth Packages](./auth-packages.md)
+2. [Auth Packages](./auth-packages/)
    - read this if you need to know the file layout and package contract
-3. [Auth Schema](./auth-schema.md)
+3. [Auth Schema](./auth-schema/)
    - read this if you are editing `model.auth` or `capabilities.toml`
-4. [Custom Auth Schema Guidance](./custom-auth-schema.md)
+4. [Custom Auth Schema Guidance](./custom-auth-schema/)
    - read this if you need to extend or eventually replace the default model
 
 ## Practical Rule
@@ -121,5 +121,5 @@ Canonical Shoppr example files:
 
 ## Read Next
 
-- [Zanzibar And Core Auth](./auth-zanzibar.md)
-- [Auth Packages](./auth-packages.md)
+- [Zanzibar And Core Auth](./auth-zanzibar/)
+- [Auth Packages](./auth-packages/)

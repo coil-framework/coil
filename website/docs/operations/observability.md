@@ -134,6 +134,6 @@ trace-export tutorial.
 
 ## Read Next
 
-- [Jobs and schedulers](jobs-and-schedulers.md)
-- [Troubleshooting](troubleshooting.md)
-- [Shoppr Observability And Audit](../use-cases/shoppr/observability-and-audit.md)
+- [Jobs and schedulers](../jobs-and-schedulers/)
+- [Troubleshooting](../troubleshooting/)
+- [Shoppr Observability And Audit](../use-cases/shoppr/observability-and-audit/)

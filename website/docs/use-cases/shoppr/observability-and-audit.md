@@ -119,6 +119,6 @@ Do not claim the repo already contains a complete production monitoring stack tu
 
 ## Read Next
 
-- [Shoppr Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
-- [Observability, monitoring, and audit](../../operations/observability.md)
-- [Environment Variables](../../reference/environment-variables.md)
+- [Shoppr Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work/)
+- [Observability, monitoring, and audit](../../operations/observability/)
+- [Environment Variables](../../reference/environment-variables/)

@@ -163,6 +163,6 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Internationalisation](./internationalization.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
-- [SEO And Discoverability](../core-concepts/seo-and-discoverability.md)
+- [Internationalisation](./internationalization/)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets/)
+- [SEO And Discoverability](../core-concepts/seo-and-discoverability/)

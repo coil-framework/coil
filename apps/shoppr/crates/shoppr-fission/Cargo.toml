@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["site"]
+site = ["coil/site"]
+
 [dependencies]
 coil = { package = "coil-fission", version = "0.1.1", path = "../../../../crates/coil-fission", default-features = false }
 serde.workspace = true
+serde_json.workspace = true

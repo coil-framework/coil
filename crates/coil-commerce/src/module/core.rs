@@ -132,7 +132,7 @@ impl CommerceModule {
         plan.insert(
             MigrationStep::new(
                 MigrationId::new("005_catalog_publication")?,
-                owner,
+                owner.clone(),
                 50,
                 "create site-scoped catalogue publication and inventory tables",
             )?
@@ -150,6 +150,23 @@ impl CommerceModule {
             )?
             .with_statement(
                 "CREATE TABLE IF NOT EXISTS commerce_inventory_locations (product_id TEXT NOT NULL REFERENCES commerce_catalog_products(id), location_id TEXT NOT NULL, is_available BOOLEAN NOT NULL DEFAULT TRUE, updated_at BIGINT NOT NULL, PRIMARY KEY (product_id, location_id))",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("006_session_carts")?,
+                owner,
+                60,
+                "create site-scoped session carts and their authoritative lines",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_carts (site_id TEXT NOT NULL, session_id TEXT NOT NULL, principal_id TEXT, status TEXT NOT NULL, currency TEXT NOT NULL, updated_at BIGINT NOT NULL, PRIMARY KEY (site_id, session_id))",
+            )?
+            .with_statement(
+                "CREATE INDEX IF NOT EXISTS commerce_carts_by_principal ON commerce_carts (site_id, principal_id, updated_at DESC) WHERE principal_id IS NOT NULL",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_cart_lines (site_id TEXT NOT NULL, session_id TEXT NOT NULL, product_id TEXT NOT NULL REFERENCES commerce_catalog_products(id), title TEXT NOT NULL, quantity BIGINT NOT NULL CHECK (quantity > 0), unit_price_minor BIGINT NOT NULL, currency TEXT NOT NULL, updated_at BIGINT NOT NULL, PRIMARY KEY (site_id, session_id, product_id), FOREIGN KEY (site_id, session_id) REFERENCES commerce_carts(site_id, session_id) ON DELETE CASCADE)",
             )?,
         )?;
         Ok(plan)

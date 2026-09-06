@@ -1412,7 +1412,7 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
 
     let module = CommerceModule::new();
     let migrations = module.migration_plan().unwrap();
-    assert_eq!(migrations.ordered_steps().len(), 5);
+    assert_eq!(migrations.ordered_steps().len(), 6);
     assert_eq!(
         migrations.ordered_steps()[0].owner,
         MigrationOwner::Module("commerce".to_string())
@@ -1439,5 +1439,22 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
             .statements
             .iter()
             .any(|statement| statement.contains("commerce_inventory_locations"))
+    );
+    let carts = migrations
+        .ordered_steps()
+        .iter()
+        .find(|step| step.id.as_str() == "006_session_carts")
+        .expect("site-scoped cart migration");
+    assert!(
+        carts
+            .statements
+            .iter()
+            .any(|statement| statement.contains("commerce_cart_lines"))
+    );
+    assert!(
+        carts
+            .statements
+            .iter()
+            .any(|statement| statement.contains("ON DELETE CASCADE"))
     );
 }

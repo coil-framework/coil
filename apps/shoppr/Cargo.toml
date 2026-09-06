@@ -17,9 +17,10 @@ rust-version = "1.85"
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio-rustls"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 coil-admin = { version = "0.1.1", path = "../../crates/coil-admin" }
-coil = { package = "coil-rs", version = "0.1.1", path = "../../crates/coil" }
+coil = { package = "coil-rs", version = "0.1.1", path = "../../crates/coil", default-features = false }
 coil-app = { version = "0.1.1", path = "../../crates/coil-app" }
 coil-assets = { version = "0.1.1", path = "../../crates/coil-assets" }
 coil-auth = { version = "0.1.1", path = "../../crates/coil-auth" }

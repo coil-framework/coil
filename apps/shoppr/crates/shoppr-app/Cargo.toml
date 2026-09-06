@@ -19,6 +19,7 @@ hex = "0.4"
 shoppr-backend = { path = "../shoppr-backend" }
 serde.workspace = true
 sha2 = "0.10"
+sqlx.workspace = true
 tokio.workspace = true
 toml = "0.8"
 wat = "1"

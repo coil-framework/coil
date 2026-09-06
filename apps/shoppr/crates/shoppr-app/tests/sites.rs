@@ -187,10 +187,10 @@ signed_url_ttl_secs = 900
         body
     });
 
-    assert!(body.contains("One customer app, three Shoppr markets"), "{body}");
-    assert!(body.contains("UK flagship storefront"), "{body}");
-    assert!(body.contains("France city edit"), "{body}");
-    assert!(body.contains("Poland cold-weather edit"), "{body}");
+    assert!(body.contains("Explore our curated edits and local events across our flagship locations."), "{body}");
+    assert!(body.contains("Shoppr Townhouse, London"), "{body}");
+    assert!(body.contains("Le Marais Edit"), "{body}");
+    assert!(body.contains("Śródmieście Studio"), "{body}");
     assert!(body.contains("/en-GB/shop"), "{body}");
     assert!(body.contains("/fr-FR/events"), "{body}");
     assert!(body.contains("/pl-PL/shop/products/harbor-scarf"), "{body}");
@@ -280,10 +280,10 @@ signed_url_ttl_secs = 900
         (fr_body, pl_body)
     });
 
-    assert!(fr_body.contains("Une application cliente, trois marchés Shoppr."), "{fr_body}");
+    assert!(fr_body.contains("Boutiques Emblématiques"), "{fr_body}");
     assert!(fr_body.contains("Voir les nouveautés"), "{fr_body}");
     assert!(fr_body.contains("Marché"), "{fr_body}");
-    assert!(pl_body.contains("Jedna aplikacja klienta, trzy rynki Shoppr."), "{pl_body}");
+    assert!(pl_body.contains("Główne Salony"), "{pl_body}");
     assert!(pl_body.contains("Zobacz nowości"), "{pl_body}");
     assert!(pl_body.contains("Rynek"), "{pl_body}");
 }

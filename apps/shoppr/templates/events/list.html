@@ -7,15 +7,12 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor events">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section class="home-page events-page">
         <article class="catalog-section">
-          <p class="catalog-section__eyebrow">Events</p>
-          <h1>Event discovery now lives in the same product as memberships and editorial pages.</h1>
+          <p class="catalog-section__eyebrow" coil:t="events.list_eyebrow">Events</p>
+          <h1 coil:t="events.list_title">Event discovery now lives in the same product as memberships and editorial pages.</h1>
           <p>
             This route is no longer a placeholder. It now exposes real event cards, venue context,
             and timeslot summaries so the customer can understand what happens before booking begins.
@@ -26,7 +23,7 @@
             </a>
             <a
               class="button button--secondary"
-              href="/en-GB/shop/collections/events"
+              href="/shop/collections/events"
               coil:attr="href=${links.events_collection}"
             >
               Browse event-linked offers
@@ -38,7 +35,7 @@
           <article class="catalog-section collection-grid__item" coil:each="event : ${events}">
             <p class="catalog-section__eyebrow" coil:text="${event.eyebrow}">Event</p>
             <h2>
-              <a href="/en-GB/events/spring-tasting" coil:attr="href=${event.href}" coil:text="${event.title}">
+              <a href="/events/spring-tasting" coil:attr="href=${event.href}" coil:text="${event.title}">
                 Spring Tasting Evening
               </a>
             </h2>
@@ -67,7 +64,7 @@
               Priority note.
             </p>
             <div class="checkout-actions">
-              <a class="button" href="/en-GB/events/spring-tasting" coil:attr="href=${event.href}">
+              <a class="button" href="/events/spring-tasting" coil:attr="href=${event.href}">
                 View event
               </a>
               <a
@@ -82,8 +79,8 @@
         </section>
 
         <article class="catalog-section" coil:unless="${has_events}">
-          <p class="catalog-section__eyebrow">Events</p>
-          <h2>No events are currently visible</h2>
+          <p class="catalog-section__eyebrow" coil:t="events.list_eyebrow">Events</p>
+          <h2 coil:t="events.no_events_title">No events are currently visible</h2>
           <p>
             This route is live, but there are no current event cards to render for this audience.
           </p>

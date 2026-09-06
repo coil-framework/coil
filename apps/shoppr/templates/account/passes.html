@@ -12,14 +12,11 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main account-page">
       <section class="account-page__intro">
-        <p class="account-page__eyebrow">Customer account</p>
-        <h1>Passes and credits</h1>
+        <p class="account-page__eyebrow" coil:t="account.eyebrow">Customer account</p>
+        <h1 coil:t="account.nav.passes">Passes and credits</h1>
         <p coil:text="${pass_wallet.summary}">
           Use this page to answer three questions quickly: what pass-backed access exists on this
           account, how much balance is still available, and which event inventory those passes are
@@ -46,7 +43,7 @@
 
       <section class="account-page__cards">
         <article class="account-card">
-          <h2>Active pass programs</h2>
+          <h2 coil:t="account.summary.passes_body">Active pass programs</h2>
           <ul class="account-panel__list" coil:if="${account.has_pass_programs}">
             <li coil:each="program : ${pass_programs}">
               <strong coil:text="${program.title}">Spring Tasting Pass</strong>
@@ -60,7 +57,7 @@
               </p>
               <a
                 class="button button--secondary"
-                href="/en-GB/events"
+                href="/events"
                 coil:attr="href=${program.product_href}"
               >
                 Open product
@@ -77,7 +74,7 @@
             </p>
             <a
               class="button"
-              href="/en-GB/events"
+              href="/events"
               coil:attr="href=${account.passes_cta_url}"
             >
               Browse event passes
@@ -86,7 +83,7 @@
         </article>
 
         <article class="account-card">
-          <h2>Wallet summary</h2>
+          <h2 coil:t="account.summary.wallet_heading">Wallet summary</h2>
           <p>
             Available
             <strong coil:text="${pass_wallet.available}">1</strong>
@@ -103,11 +100,11 @@
 
       <section class="account-orders">
         <article class="account-panel">
-          <p class="account-panel__eyebrow">Event bookings</p>
-          <h2>Bookings that can consume pass-backed access</h2>
+          <p class="account-panel__eyebrow" coil:t="account.nav.events">Event bookings</p>
+          <h2 coil:t="events.list_title">Bookings that can consume pass-backed access</h2>
           <ul class="account-panel__list" coil:if="${account.has_event_bookings}">
             <li coil:each="event : ${event_bookings}">
-              <a href="/en-GB/events/example" coil:attr="href=${event.href}">
+              <a href="/events/example" coil:attr="href=${event.href}">
                 <strong coil:text="${event.event_title}">Spring tasting evening</strong>
               </a>
               <span coil:text="${event.status_label}">Confirmed</span>
@@ -127,8 +124,6 @@
         </article>
       </section>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

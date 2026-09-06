@@ -1,8 +1,8 @@
 <section class="account-panels" xmlns:coil="https://coil.rs" coil:fragment="panels">
   <div class="account-panels__grid">
     <article class="account-panel">
-      <p class="account-panel__eyebrow">Orders</p>
-      <h2>Recent purchases</h2>
+      <p class="account-panel__eyebrow" coil:t="account.orders_heading">Orders</p>
+      <h2 coil:t="account.summary.orders_body">Recent purchases</h2>
       <ul class="account-panel__list" coil:if="${account.has_recent_orders}">
         <li coil:each="order : ${recent_orders}">
           <strong coil:text="${order.reference}">HS-1048</strong>
@@ -28,8 +28,8 @@
     </article>
 
     <article class="account-panel">
-      <p class="account-panel__eyebrow">Membership</p>
-      <h2>Access and renewals</h2>
+      <p class="account-panel__eyebrow" coil:t="account.nav.memberships">Membership</p>
+      <h2 coil:t="account.summary.memberships_body">Access and renewals</h2>
       <div coil:if="${account.has_membership}">
         <p>
           <strong coil:text="${membership_summary.tier_name}">Harbor Circle</strong>
@@ -38,7 +38,7 @@
         <p coil:text="${membership_summary.renewal_text}">
           Renewing on 18 April with market-day priority access.
         </p>
-        <a class="button" href="/account/memberships">View membership details</a>
+        <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View membership details</a>
       </div>
       <div coil:if="${account.has_pending_membership_order}">
         <p>
@@ -63,7 +63,7 @@
         </p>
         <a
           class="button"
-          href="/en-GB/shop/collections/memberships"
+          href="/shop/collections/memberships"
           coil:attr="href=${account.membership_cta_url}"
         >
           Explore memberships
@@ -72,15 +72,15 @@
     </article>
 
     <article class="account-panel">
-      <p class="account-panel__eyebrow">Support</p>
-      <h2>Continue your account journey</h2>
+      <p class="account-panel__eyebrow" coil:t="home.sections.shortcuts.eyebrow">Support</p>
+      <h2 coil:t="catalog.loop_title">Continue your account journey</h2>
       <p coil:if="${account.has_customer_email}">
         Use this account area to review orders, retry checkout, or check membership access for
         <strong coil:text="${customer.email}">member@example.com</strong>.
       </p>
       <p coil:if="${account.has_latest_order}">
         If the latest order still shows
-        <strong>Pending Payment</strong>
+        <strong coil:t="account.payment_pending_notice">Pending Payment</strong>
         after you return from the provider, keep this browser session and refresh the account
         surfaces before contacting support.
       </p>
@@ -93,19 +93,19 @@
         and membership changes from another browser will not appear here yet.
       </p>
       <ul class="account-panel__list">
-        <li><a href="/account/orders">Review order history</a></li>
-        <li><a href="/account/memberships">Check membership status</a></li>
-        <li><a href="/checkout">Open checkout</a></li>
-        <li><a href="/en-GB/shop" coil:attr="href=${links.catalog}">Continue shopping</a></li>
+        <li><a href="/account/orders" coil:attr="href=${links.orders}" coil:t="account.nav.orders">Review order history</a></li>
+        <li><a href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.nav.memberships">Check membership status</a></li>
+        <li><a href="/checkout" coil:attr="href=${links.checkout}" coil:t="cart.checkout_button">Open checkout</a></li>
+        <li><a href="/shop" coil:attr="href=${links.catalog}" coil:t="cart.continue_shopping">Continue shopping</a></li>
       </ul>
     </article>
 
     <article class="account-panel">
-      <p class="account-panel__eyebrow">Event bookings</p>
-      <h2>Timed experiences and reservation state</h2>
+      <p class="account-panel__eyebrow" coil:t="account.nav.events">Event bookings</p>
+      <h2 coil:t="events.list_title">Timed experiences and reservation state</h2>
       <ul class="account-panel__list" coil:if="${account.has_event_bookings}">
         <li coil:each="booking : ${event_bookings}">
-          <a href="/en-GB/events/spring-tasting" coil:attr="href=${booking.href}">
+          <a href="/events/spring-tasting" coil:attr="href=${booking.href}">
             <strong coil:text="${booking.event_title}">Spring Tasting Evening</strong>
           </a>
           <span coil:text="${booking.status_label}">Confirmed</span>
@@ -125,7 +125,7 @@
         </p>
         <a
           class="button"
-          href="/en-GB/events"
+          href="/events"
           coil:attr="href=${account.event_bookings_cta_url}"
           coil:text="${account.event_bookings_cta_label}"
         >
@@ -135,8 +135,8 @@
     </article>
 
     <article class="account-panel">
-      <p class="account-panel__eyebrow">Passes and credits</p>
-      <h2>Reusable access and balance state</h2>
+      <p class="account-panel__eyebrow" coil:t="account.nav.passes">Passes and credits</p>
+      <h2 coil:t="account.summary.passes_body">Reusable access and balance state</h2>
       <ul class="account-panel__list" coil:if="${account.has_pass_programs}">
         <li coil:each="program : ${pass_programs}">
           <strong coil:text="${program.title}">Spring Tasting Pass</strong>

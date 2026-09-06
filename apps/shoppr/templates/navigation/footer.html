@@ -1,0 +1,25 @@
+<footer class="site-footer" xmlns:coil="https://coil.rs" coil:fragment="footer">
+  <div>
+    <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Shoppr Townhouse</p>
+    <strong coil:text="${site.display_name}">Shoppr UK</strong>
+    <p coil:text="${site.settings.footer_body}">Modern urban essentials, curated for the city.</p>
+  </div>
+  <div>
+    <p class="site-footer__eyebrow" coil:t="home.footer.explore">Explore</p>
+    <a href="/shop" coil:attr="href=${links.catalog}" coil:t="shell.footer.catalog">Catalog</a>
+    <a href="/shop/collections" coil:attr="href=${links.collections}" coil:t="shell.footer.collections">Collections</a>
+    <a href="/events" coil:t="home.sections.verticals.view_events">Events</a>
+  </div>
+  <div>
+    <p class="site-footer__eyebrow" coil:t="home.footer.inspect">Services</p>
+    <a href="/account" coil:t="shell.utility.account">Account</a>
+    <a href="/account/memberships" coil:t="home.sections.interactivity.eyebrow">Harbor Circle</a>
+    <a href="/__dev" coil:t="shell.utility.dev_tools">Support</a>
+  </div>
+  <div>
+    <p class="site-footer__eyebrow" coil:t="home.footer.platform">Legal</p>
+    <a href="/admin" coil:t="shell.footer.catalog_admin">Terms of Service</a>
+    <a href="/admin/orders" coil:t="shell.footer.orders">Privacy Policy</a>
+    <a href="/admin/pages" coil:t="shell.footer.cms">Cookie Policy</a>
+  </div>
+</footer>

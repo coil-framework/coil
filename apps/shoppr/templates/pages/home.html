@@ -8,85 +8,52 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page_title}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr Townhouse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p coil:t="home.utility.summary">Shoppr mirrors the pace and polish of a modern fashion flagship while still exposing Coil’s modular surface.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
-          <a href="/admin" coil:t="shell.utility.admin">Admin</a>
-          <a href="/account" coil:t="shell.utility.account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+  <body class="shoppr-shell shoppr-shell--elevated">
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section class="home-page">
+        <!-- Elevated Hero Carousel -->
         <section class="home-hero" data-carousel="hero">
           <div class="home-hero__track">
+            <!-- Campaign Slide 1: The Spring Edit -->
             <article
               class="home-hero__slide is-active"
               data-carousel-slide="slide"
-              style="--hero-image:url('https://unsplash.com/photos/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE/download?force=true&amp;w=1600&amp;q=80')"
+              style="--hero-image:url('/theme/assets/images/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE.jpg')"
             >
               <div class="home-hero__content">
                 <p class="home-hero__eyebrow" coil:text="${site.display_name}">Shoppr UK</p>
-                <h1 coil:t="home.hero.title">Quiet luxury, fast routes, and the full storefront loop in one starter.</h1>
-                <p coil:t="home.hero.summary">Shoppr is now a fashion-first demo: immersive campaigns, catalog depth, interactive product detail, and visible market and language switching across one customer app.</p>
+                <h1 coil:t="home.hero.title">The Spring Edit.</h1>
+                <p coil:t="home.hero.summary">Lightweight layers, refined silhouettes, and transitional pieces designed for the shift in seasons.</p>
                 <div class="checkout-actions">
-                  <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="home.hero.primary_cta">Shop new arrivals</a>
-                  <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="home.hero.secondary_cta">Browse collections</a>
+                  <a class="button" href="/shop" coil:attr="href=${links.catalog}" coil:t="home.hero.primary_cta">Shop new arrivals</a>
+                  <a class="button button--secondary" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="home.hero.secondary_cta">Explore the campaign</a>
                 </div>
               </div>
             </article>
+            <!-- Campaign Slide 2: Membership Exclusives -->
             <article
               class="home-hero__slide"
               data-carousel-slide="slide"
-              style="--hero-image:url('https://unsplash.com/photos/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao/download?force=true&amp;w=1600&amp;q=80')"
+              style="--hero-image:url('/theme/assets/images/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao.jpg')"
             >
               <div class="home-hero__content">
-                <p class="home-hero__eyebrow" coil:t="home.hero_secondary.eyebrow">Interactive layering</p>
-                <h1 coil:t="home.hero_secondary.title">Static-first pages with motion, panels, galleries, and commerce actions layered on.</h1>
-                <p coil:t="home.hero_secondary.summary">The demo keeps the HTML-first contract intact while showing the richer interaction layer real customers expect from a premium multi-region storefront.</p>
+                <p class="home-hero__eyebrow" coil:t="home.hero_secondary.eyebrow">Limited Edition</p>
+                <h1 coil:t="home.hero_secondary.title">The Harbor Capsule.</h1>
+                <p coil:t="home.hero_secondary.summary">A focused collection of heavyweight knits and structured outerwear. Available exclusively to Harbor Circle members before the general release.</p>
                 <div class="checkout-actions">
-                  <a class="button" href="/cart" coil:attr="href=${links.cart}" coil:t="home.hero_secondary.cart_cta">Open cart</a>
-                  <a class="button button--secondary" href="/account" coil:t="home.hero_secondary.account_cta">Explore account</a>
+                  <a class="button" href="/account/memberships" coil:t="home.sections.verticals.explore_memberships">Discover Harbor Circle</a>
+                  <a class="button button--secondary" href="/account" coil:t="home.hero_secondary.account_cta">Sign in for access</a>
                 </div>
               </div>
             </article>
@@ -97,46 +64,48 @@
           </div>
         </section>
 
+        <!-- Brand Merchandising & Store Experience -->
         <section class="editorial-rail">
-          <article class="editorial-card editorial-card--image" style="--card-image:url('https://unsplash.com/photos/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U/download?force=true&amp;w=1200&amp;q=80')">
+          <article class="editorial-card editorial-card--image" style="--card-image:url('/theme/assets/images/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U.jpg')">
             <div class="editorial-card__content">
-              <p class="editorial-card__eyebrow" coil:t="home.editorial.store.eyebrow">Store view</p>
-              <h2 coil:t="home.editorial.store.title">Three markets, one brand system.</h2>
-              <p coil:t="home.editorial.store.summary">Run UK, France, and Poland from one customer workspace while keeping inventory and stories market-aware.</p>
+              <p class="editorial-card__eyebrow" coil:t="home.editorial.store.eyebrow">Our Spaces</p>
+              <h2 coil:t="home.editorial.store.title">Visit the Townhouse.</h2>
+              <p coil:t="home.editorial.store.summary">Experience the collection in person. Book a styling appointment or join us for our upcoming in-store events in London, Paris, and Warsaw.</p>
             </div>
           </article>
           <article class="editorial-card">
-            <p class="editorial-card__eyebrow" coil:t="home.editorial.developer.eyebrow">Developer-visible</p>
-            <h2 coil:t="home.editorial.developer.title">Every polished page still exposes the platform underneath.</h2>
-            <p coil:t="home.editorial.developer.summary">Admin, account, dev login, CMS, and linked backend affordances stay easy to discover from the public shell.</p>
-            <a class="button button--secondary" href="/admin" coil:t="home.editorial.developer.cta">Open admin</a>
+            <p class="editorial-card__eyebrow" coil:t="home.editorial.developer.eyebrow">Shoppr Journal</p>
+            <h2 coil:t="home.editorial.developer.title">Behind the design.</h2>
+            <p coil:t="home.editorial.developer.summary">Explore the materials, processes, and stories behind our latest seasonal collection.</p>
+            <a class="button button--secondary" href="/shop/collections" coil:t="home.editorial.developer.cta">Read the journal</a>
           </article>
         </section>
 
+        <!-- Flagship Locations (Multi-site) -->
         <section class="market-showcase">
           <header class="market-showcase__header">
-            <p class="collection-grid__eyebrow" coil:t="home.markets.eyebrow">Multi-site demo</p>
-            <h2 coil:t="home.markets.title">One customer app, three Shoppr markets.</h2>
-            <p coil:t="home.markets.summary">Each market keeps its own host, default locale, assortment emphasis, and merchandising mood while sharing the same core application.</p>
+            <p class="collection-grid__eyebrow" coil:t="home.markets.eyebrow">Locations</p>
+            <h2 coil:t="home.markets.title">Global Flagships.</h2>
+            <p coil:t="home.markets.summary">Explore our curated edits and local events across our flagship locations.</p>
           </header>
           <div class="market-showcase__grid">
             <article class="market-card">
-              <p class="market-card__eyebrow" coil:t="home.markets.uk.eyebrow">shoppr-uk</p>
-              <h3 coil:t="home.markets.uk.title">UK flagship storefront</h3>
-              <p coil:t="home.markets.uk.summary">Lead with new arrivals, sharp product detail, and the full path from browse to checkout.</p>
-              <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="home.markets.uk.cta">Open UK shop</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.uk.eyebrow">London</p>
+              <h3 coil:t="home.markets.uk.title">Shoppr Townhouse, London</h3>
+              <p coil:t="home.markets.uk.summary">Our original flagship. Discover the full collection and book personal styling sessions.</p>
+              <a class="button button--secondary" href="/shop" coil:attr="href=${links.catalog}" coil:t="home.markets.uk.cta">Shop London Edit</a>
             </article>
             <article class="market-card">
-              <p class="market-card__eyebrow" coil:t="home.markets.fr.eyebrow">shoppr-fr</p>
-              <h3 coil:t="home.markets.fr.title">France city edit</h3>
-              <p coil:t="home.markets.fr.summary">Give the Paris market a tighter campaign voice and an event-led edit without forking the app.</p>
-              <a class="button" href="/fr-FR/events" coil:t="home.markets.fr.cta">Open France edit</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.fr.eyebrow">Paris</p>
+              <h3 coil:t="home.markets.fr.title">Le Marais Edit</h3>
+              <p coil:t="home.markets.fr.summary">A curated selection tailored for the city, featuring exclusive seasonal drops.</p>
+              <a class="button button--secondary" href="/fr-FR/events" coil:t="home.markets.fr.cta">Shop Paris Edit</a>
             </article>
             <article class="market-card">
-              <p class="market-card__eyebrow" coil:t="home.markets.pl.eyebrow">shoppr-pl</p>
-              <h3 coil:t="home.markets.pl.title">Poland cold-weather edit</h3>
-              <p coil:t="home.markets.pl.summary">Show a different winter assortment and localized Polish routes on the same shared platform.</p>
-              <a class="button" href="/pl-PL/shop/products/harbor-scarf" coil:t="home.markets.pl.cta">Open Poland product</a>
+              <p class="market-card__eyebrow" coil:t="home.markets.pl.eyebrow">Warsaw</p>
+              <h3 coil:t="home.markets.pl.title">Śródmieście Studio</h3>
+              <p coil:t="home.markets.pl.summary">Our newest location showcasing technical outerwear and winter essentials.</p>
+              <a class="button button--secondary" href="/pl-PL/shop/products/harbor-scarf" coil:t="home.markets.pl.cta">Shop Warsaw Edit</a>
             </article>
           </div>
         </section>
@@ -144,49 +113,29 @@
         <div coil:replace="~{commerce/collection-grid :: grid}"></div>
         <div coil:replace="~{commerce/product-grid :: grid}"></div>
 
+        <!-- Memberships and Services -->
         <section class="catalog-sections">
-          <article class="catalog-section">
-            <p class="catalog-section__eyebrow" coil:t="home.sections.interactivity.eyebrow">Layered interactivity</p>
-            <h2 coil:t="home.sections.interactivity.title">The storefront stays HTML-first while behaving like a modern flagship.</h2>
-            <p coil:t="home.sections.interactivity.summary">Carousel controls, market and locale switchers, product accordions, and gallery states are layered on rather than replacing the base render contract.</p>
-          </article>
-          <article class="catalog-section">
-            <p class="catalog-section__eyebrow" coil:t="home.sections.shortcuts.eyebrow">Developer shortcuts</p>
-            <h2 coil:t="home.sections.shortcuts.title">Nothing important is hidden.</h2>
-            <p coil:t="home.sections.shortcuts.summary">Public pages link cleanly into account, cart, admin, and local dev tools so developers can evaluate the whole app boundary from first run.</p>
+          <article class="catalog-section catalog-section--elevated">
+            <p class="catalog-section__eyebrow" coil:t="home.sections.interactivity.eyebrow">Harbor Circle</p>
+            <h2 coil:t="home.sections.interactivity.title">Elevate your experience.</h2>
+            <p coil:t="home.sections.interactivity.summary">Join our membership program for early access to limited capsules, complimentary alterations, and invitations to private events.</p>
             <div class="checkout-actions">
-              <a class="button" href="/__dev" coil:t="home.sections.shortcuts.dev_tools">Open dev tools</a>
-              <a class="button button--secondary" href="/admin" coil:t="home.sections.shortcuts.admin">Open admin</a>
+              <a class="button" href="/account/memberships" coil:t="home.sections.verticals.explore_memberships">Discover Harbor Circle</a>
+            </div>
+          </article>
+          <article class="catalog-section catalog-section--elevated">
+            <p class="catalog-section__eyebrow" coil:t="home.sections.shortcuts.eyebrow">Services</p>
+            <h2 coil:t="home.sections.shortcuts.title">Personal Styling.</h2>
+            <p coil:t="home.sections.shortcuts.summary">Book a complimentary session with our in-house stylists to build your seasonal wardrobe.</p>
+            <div class="checkout-actions">
+              <a class="button button--secondary" href="/events" coil:t="home.sections.shortcuts.dev_tools">Book an appointment</a>
+              <a class="button button--secondary" href="/account" coil:t="home.sections.shortcuts.admin">Contact support</a>
             </div>
           </article>
         </section>
-        <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
+
       </section>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Shoppr</p>
-        <strong coil:text="${site.display_name}">Shoppr UK</strong>
-        <p coil:text="${site.settings.footer_body}">Fashion-led Coil starter with visible multi-site, multi-locale, Rust backend, and WASM extension boundaries.</p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="home.footer.explore">Explore</p>
-        <a href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="shell.footer.catalog">Catalog</a>
-        <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="shell.footer.collections">Collections</a>
-        <a href="/cart" coil:t="shell.footer.cart">Cart</a>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="home.footer.inspect">Inspect</p>
-        <a href="/account" coil:t="shell.utility.account">Account</a>
-        <a href="/admin" coil:t="shell.utility.admin">Admin</a>
-        <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="home.footer.platform">Platform</p>
-        <a href="/admin/catalog" coil:t="shell.footer.catalog_admin">Catalog admin</a>
-        <a href="/admin/orders" coil:t="shell.footer.orders">Orders</a>
-        <a href="/admin/pages" coil:t="shell.footer.cms">CMS</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

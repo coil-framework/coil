@@ -7940,29 +7940,29 @@
   // theme/frontend/site.ts
   var PRODUCT_GALLERY_IMAGES = {
     "harbor-cap": [
-      ["https://unsplash.com/photos/a-rack-of-shirts-and-pants-hanging-on-a-clothes-rack-1pT3rOWL_hI/download?force=true&w=1200&q=80", "Shop floor rail"],
-      ["https://unsplash.com/photos/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U/download?force=true&w=1200&q=80", "Storefront detail"],
-      ["https://unsplash.com/photos/people-browsing-clothing-racks-in-a-well-lit-store-oOAYziRlpMw/download?force=true&w=1200&q=80", "Browsing detail"]
+      ["/theme/assets/images/a-rack-of-shirts-and-pants-hanging-on-a-clothes-rack-1pT3rOWL_hI.jpg", "Shop floor rail"],
+      ["/theme/assets/images/a-storefront-with-clothes-displayed-inside-Sd_vsr_eA5U.jpg", "Storefront detail"],
+      ["/theme/assets/images/people-browsing-clothing-racks-in-a-well-lit-store-oOAYziRlpMw.jpg", "Browsing detail"]
     ],
     "gold-membership": [
-      ["https://unsplash.com/photos/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao/download?force=true&w=1200&q=80", "Campaign portrait"],
-      ["https://unsplash.com/photos/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE/download?force=true&w=1200&q=80", "Wardrobe mood"],
-      ["https://unsplash.com/photos/elegant-woman-in-a-faux-fur-coat-poses-VaCpUIoNIeE/download?force=true&w=1200&q=80", "Editorial detail"]
+      ["/theme/assets/images/woman-in-colorful-outfit-and-fur-coat-DxSHu4GI0Ao.jpg", "Campaign portrait"],
+      ["/theme/assets/images/woman-in-white-dress-choosing-coat-from-fur-coats-oyLU7C-2kRE.jpg", "Wardrobe mood"],
+      ["/theme/assets/images/elegant-woman-in-a-faux-fur-coat-poses-VaCpUIoNIeE.jpg", "Editorial detail"]
     ],
     "tasting-pass": [
-      ["https://unsplash.com/photos/clothing-store-interior-with-racks-of-apparel-a-_PeeYVfQk/download?force=true&w=1200&q=80", "Paris edit"],
-      ["https://unsplash.com/photos/modern-clothing-store-interior-with-colorful-garments-on-display-DS7N9ZnKpO0/download?force=true&w=1200&q=80", "Store interior"],
-      ["https://unsplash.com/photos/modern-retail-store-interior-with-displays-and-lighting-yKENxnOwxhg/download?force=true&w=1200&q=80", "Retail lighting"]
+      ["/theme/assets/images/clothing-store-interior-with-racks-of-apparel-a-_PeeYVfQk.jpg", "Paris edit"],
+      ["/theme/assets/images/modern-clothing-store-interior-with-colorful-garments-on-display-DS7N9ZnKpO0.jpg", "Store interior"],
+      ["/theme/assets/images/modern-retail-store-interior-with-displays-and-lighting-yKENxnOwxhg.jpg", "Retail lighting"]
     ],
     "harbor-scarf": [
-      ["https://unsplash.com/photos/woman-wearing-gray-coat-CKxpOhAoSRg/download?force=true&w=1200&q=80", "Winter styling"],
-      ["https://unsplash.com/photos/grayscale-photography-of-woman-wearing-pea-coat-Zq4dVEMAZXo/download?force=true&w=1200&q=80", "Coat detail"],
-      ["https://unsplash.com/photos/woman-in-black-coat-by-a-close-door-lBabHA3imdk/download?force=true&w=1200&q=80", "Cold weather mood"]
+      ["/theme/assets/images/woman-wearing-gray-coat-CKxpOhAoSRg.jpg", "Winter styling"],
+      ["/theme/assets/images/grayscale-photography-of-woman-wearing-pea-coat-Zq4dVEMAZXo.jpg", "Coat detail"],
+      ["/theme/assets/images/woman-in-black-coat-by-a-close-door-lBabHA3imdk.jpg", "Cold weather mood"]
     ],
     "brooklyn-night-pass": [
-      ["https://unsplash.com/photos/modern-luxury-store-interior-with-display-shelves-and-seating-8YDqTT5jNXI/download?force=true&w=1200&q=80", "Night edit interior"],
-      ["https://unsplash.com/photos/modern-retail-store-interior-with-display-cases-and-lighting-CUxuy9UmFIo/download?force=true&w=1200&q=80", "Event mood"],
-      ["https://unsplash.com/photos/modern-retail-store-interior-with-display-shelves-and-products-lkDZJL5psKU/download?force=true&w=1200&q=80", "Display detail"]
+      ["/theme/assets/images/modern-luxury-store-interior-with-display-shelves-and-seating-8YDqTT5jNXI.jpg", "Night edit interior"],
+      ["/theme/assets/images/modern-retail-store-interior-with-display-cases-and-lighting-CUxuy9UmFIo.jpg", "Event mood"],
+      ["/theme/assets/images/modern-retail-store-interior-with-display-shelves-and-products-lkDZJL5psKU.jpg", "Display detail"]
     ]
   };
   var SiteInteractiveController = class extends Controller {

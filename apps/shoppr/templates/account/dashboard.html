@@ -12,10 +12,7 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section class="account-page">
         <section class="storefront-flash" coil:if="${has_flash_messages}">
@@ -24,8 +21,8 @@
           </article>
         </section>
         <div class="account-page__intro">
-          <p class="account-page__eyebrow">Customer account</p>
-          <h1>Your account</h1>
+          <p class="account-page__eyebrow" coil:t="account.eyebrow">Customer account</p>
+          <h1 coil:t="account.meta_title">Your account</h1>
           <p coil:text="${account.state_summary}">
             Review your membership status, recent orders, and the quickest route back into the
             storefront when you are ready to browse again.
@@ -46,7 +43,7 @@
           </p>
           <p coil:if="${account.has_latest_order}">
             If you have just returned from the payment provider, this dashboard can show
-            <strong>Pending Payment</strong>
+            <strong coil:t="account.payment_pending_notice">Pending Payment</strong>
             until the settlement callback updates the same browser session.
           </p>
           <div coil:if="${account.has_customer_email}">
@@ -62,7 +59,7 @@
         <nav class="account-page__nav" coil:replace="~{account/nav :: nav}"></nav>
         <div class="account-page__cards">
           <article class="account-card">
-            <h2>Memberships</h2>
+            <h2 coil:t="account.nav.memberships">Memberships</h2>
             <p coil:if="${account.has_membership}">
               Check your active tiers, renewals, and entitlement status.
             </p>
@@ -79,13 +76,13 @@
               No active membership is attached to this account view yet. Open the membership area
               to check qualifying orders or return to the storefront collection to join.
             </p>
-            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View memberships</a>
             <a class="button button--secondary" href="/account/orders" coil:if="${account.has_pending_membership_order}">
               View order history
             </a>
             <a
               class="button button--secondary"
-              href="/en-GB/shop/collections/memberships"
+              href="/shop/collections/memberships"
               coil:if="${account.needs_membership_purchase}"
               coil:attr="href=${account.membership_cta_url}"
             >
@@ -93,7 +90,7 @@
             </a>
           </article>
           <article class="account-card">
-            <h2>Orders and storefront</h2>
+            <h2 coil:t="account.orders_heading">Orders and storefront</h2>
             <p coil:if="${account.has_recent_orders}">
               Review payment status, receipt details, and post-checkout next steps before heading
               back into the storefront. If the latest order still says Pending Payment, wait for
@@ -107,7 +104,7 @@
             </a>
             <a
               class="button button--secondary"
-              href="/en-GB/shop"
+              href="/shop"
               coil:attr="href=${account.orders_cta_url}"
               coil:text="${account.orders_cta_label}"
             >
@@ -115,7 +112,7 @@
             </a>
           </article>
           <article class="account-card">
-            <h2>Event bookings</h2>
+            <h2 coil:t="account.nav.events">Event bookings</h2>
             <p coil:if="${account.has_event_bookings}">
               Review confirmed seats, held reservations, and waitlist movement without leaving the
               same account surface.
@@ -126,7 +123,7 @@
             </p>
             <a
               class="button"
-              href="/en-GB/events"
+              href="/events"
               coil:attr="href=${account.event_bookings_cta_url}"
               coil:text="${account.event_bookings_cta_label}"
             >
@@ -137,7 +134,7 @@
             </a>
           </article>
           <article class="account-card">
-            <h2>Passes and credits</h2>
+            <h2 coil:t="account.nav.passes">Passes and credits</h2>
             <p coil:if="${account.has_pass_programs}">
               Track event passes, remaining credits, and redemption history from the same customer
               view used for memberships and orders.
@@ -151,7 +148,7 @@
             </a>
             <a
               class="button button--secondary"
-              href="/en-GB/events"
+              href="/events"
               coil:attr="href=${account.passes_cta_url}"
               coil:text="${account.passes_cta_label}"
             >
@@ -162,8 +159,6 @@
         <div coil:replace="~{account/summary-panels :: panels}"></div>
       </section>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

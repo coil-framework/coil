@@ -12,19 +12,16 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main cart-page">
       <section class="cart-page__intro">
-        <p class="cart-page__eyebrow">Cart</p>
-        <h1>Review the basket before moving to payment.</h1>
+        <p class="cart-page__eyebrow" coil:t="cart.eyebrow">Cart</p>
+        <h1 coil:t="cart.title">Review the basket before moving to payment.</h1>
       </section>
 
       <div class="cart-page__grid">
         <section class="cart-card">
-          <h2>Items</h2>
+          <h2 coil:t="cart.items_heading">Items</h2>
           <form class="commerce-form cart-update-form" action="/cart" method="post">
             <input type="hidden" name="cart_action" value="update" />
             <ul class="cart-lines" coil:if="${cart_items}">
@@ -34,7 +31,7 @@
                   <p coil:text="${item.variant}">Seasonal assortment</p>
                 </div>
                 <label class="commerce-form__field commerce-form__field--compact">
-                  <span>Qty</span>
+                  <span coil:t="cart.quantity_label">Qty</span>
                   <input
                     type="number"
                     name="quantity"
@@ -53,7 +50,7 @@
                   <p>Seasonal assortment</p>
                 </div>
                 <label class="commerce-form__field commerce-form__field--compact">
-                  <span>Qty</span>
+                  <span coil:t="cart.quantity_label">Qty</span>
                   <input type="number" name="line-1-quantity" min="0" value="1" />
                 </label>
                 <strong>GBP 48</strong>
@@ -64,35 +61,33 @@
                   <p>Natural canvas</p>
                 </div>
                 <label class="commerce-form__field commerce-form__field--compact">
-                  <span>Qty</span>
+                  <span coil:t="cart.quantity_label">Qty</span>
                   <input type="number" name="line-2-quantity" min="0" value="1" />
                 </label>
                 <strong>GBP 22</strong>
               </li>
             </ul>
             <div class="cart-page__actions">
-              <button class="button button--secondary" type="submit">Update cart</button>
+              <button class="button button--secondary" type="submit" coil:t="cart.update_button">Update cart</button>
             </div>
           </form>
         </section>
 
         <aside class="cart-card">
-          <h2>Summary</h2>
+          <h2 coil:t="cart.summary_heading">Summary</h2>
           <p><span>Subtotal</span><strong coil:text="${cart_summary.subtotal}">GBP 70</strong></p>
           <p><span>Delivery</span><strong coil:text="${cart_summary.shipping}">GBP 6</strong></p>
           <p><span>Total</span><strong coil:text="${cart_summary.total}">GBP 76</strong></p>
           <div class="cart-page__actions">
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input type="hidden" name="cart_intent" value="reviewed" />
-              <button class="button" type="submit">Checkout</button>
+              <button class="button" type="submit" coil:t="cart.checkout_button">Checkout</button>
             </form>
-            <a class="button" href="/shop">Continue shopping</a>
+            <a class="button" href="/shop" coil:attr="href=${links.catalog}" coil:t="cart.continue_shopping">Continue shopping</a>
           </div>
         </aside>
       </div>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

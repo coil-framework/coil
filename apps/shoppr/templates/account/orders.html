@@ -12,14 +12,11 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main account-page">
       <section class="account-page__intro">
-        <p class="account-page__eyebrow">Customer account</p>
-        <h1>Order history</h1>
+        <p class="account-page__eyebrow" coil:t="account.eyebrow">Customer account</p>
+        <h1 coil:t="account.nav.orders">Order history</h1>
         <p coil:text="${account.state_summary}">
           Review completed purchases, payment details, and any membership-linked checkout history.
         </p>
@@ -32,7 +29,7 @@
         </p>
         <p coil:if="${account.has_latest_order}">
           If you have just returned from the payment provider, the latest order can remain in
-          <strong>Pending Payment</strong>
+          <strong coil:t="account.payment_pending_notice">Pending Payment</strong>
           until settlement is confirmed for this same browser session.
         </p>
         <p coil:if="${account.has_customer_email}">
@@ -44,8 +41,8 @@
 
       <section class="account-orders" coil:if="${account.has_recent_orders}">
         <article class="account-panel">
-          <p class="account-panel__eyebrow">Orders</p>
-          <h2>Latest purchases</h2>
+          <p class="account-panel__eyebrow" coil:t="account.orders_heading">Orders</p>
+          <h2 coil:t="account.latest_order_label">Latest purchases</h2>
           <ol class="account-panel__list">
             <li coil:each="order : ${recent_orders}">
               <div>
@@ -71,8 +68,8 @@
 
       <section class="account-orders" coil:unless="${account.has_recent_orders}">
         <article class="account-panel">
-          <p class="account-panel__eyebrow">Orders</p>
-          <h2>No completed orders yet</h2>
+          <p class="account-panel__eyebrow" coil:t="account.orders_heading">Orders</p>
+          <h2 coil:t="confirmation.empty_title">No completed orders yet</h2>
           <p coil:text="${account.orders_empty_text}">
             Completed storefront purchases will appear here once checkout has finished.
           </p>
@@ -89,7 +86,7 @@
 
       <section class="account-page__cards">
         <article class="account-card">
-          <h2>Memberships</h2>
+          <h2 coil:t="account.nav.memberships">Memberships</h2>
           <div coil:if="${account.has_membership}">
             <p>
               <strong coil:text="${membership_summary.tier_name}">Harbor Circle</strong>
@@ -98,7 +95,7 @@
             <p coil:text="${membership_summary.renewal_text}">
               Renewal timing and entitlement state will appear here after sync.
             </p>
-            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View memberships</a>
           </div>
           <div coil:if="${account.has_pending_membership_order}">
             <p>
@@ -110,7 +107,7 @@
               captured for this account view. After a provider return, use this order history to
               confirm the latest status, then return to memberships once payment has settled.
             </p>
-            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View memberships</a>
             <a class="button button--secondary" href="/account/orders">
               Review this order
             </a>
@@ -119,7 +116,7 @@
             <p coil:text="${account.membership_empty_text}">
               No active membership is attached yet.
             </p>
-            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View memberships</a>
             <a
               class="button button--secondary"
               href="/shop/collections/memberships"
@@ -130,7 +127,7 @@
           </div>
         </article>
         <article class="account-card">
-          <h2>Next steps</h2>
+          <h2 coil:t="catalog.loop_title">Next steps</h2>
           <p coil:if="${account.has_recent_orders}">
             Review order status, then continue shopping or return to checkout if you still have
             work to finish on this browser session. If you bought membership access, the
@@ -141,15 +138,13 @@
             Start from the storefront, then come back here once checkout has completed on this
             browser session.
           </p>
-          <a class="button" href="/checkout">Open checkout</a>
-          <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
+          <a class="button" href="/checkout" coil:attr="href=${links.checkout}" coil:t="cart.checkout_button">Open checkout</a>
+          <a class="button button--secondary" href="/shop" coil:attr="href=${links.catalog}">
             Continue shopping
           </a>
         </article>
       </section>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

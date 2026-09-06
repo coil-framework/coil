@@ -12,15 +12,12 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main collections-page">
       <section class="collections-page__intro">
         <p class="collections-page__eyebrow">Collections</p>
         <p>
-          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
+          <a href="/shop" coil:attr="href=${links.catalog}">Shop</a>
           <span>/</span>
           <span>Collections</span>
         </p>
@@ -30,7 +27,7 @@
           easier-to-shop edit.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}">Browse full catalog</a>
+          <a class="button" href="/shop" coil:attr="href=${links.catalog}">Browse full catalog</a>
           <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
             Review cart
           </a>
@@ -57,7 +54,7 @@
             <strong coil:text="${hub.product_count}">3</strong>
             products currently support this discovery path.
           </p>
-          <a class="button button--secondary" href="/en-GB/shop/collections/featured" coil:attr="href=${hub.href}">
+          <a class="button button--secondary" href="/shop/collections/featured" coil:attr="href=${hub.href}">
             Open collection
           </a>
         </article>
@@ -76,8 +73,6 @@
       <div coil:replace="~{commerce/product-grid :: grid}"></div>
       <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

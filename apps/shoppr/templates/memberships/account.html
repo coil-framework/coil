@@ -12,14 +12,11 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main memberships-page">
       <section class="memberships-page__intro">
-        <p class="memberships-page__eyebrow">Account access</p>
-        <h1>Memberships</h1>
+        <p class="memberships-page__eyebrow" coil:t="memberships_account.eyebrow">Account access</p>
+        <h1 coil:t="memberships_account.title">Memberships</h1>
         <p coil:text="${account.state_summary}">
           This page gives customers a direct answer to what they have, when it renews, and what
           support or priority access comes with it.
@@ -38,7 +35,7 @@
         </p>
         <p coil:if="${account.has_latest_order}">
           After returning from the payment provider, this page can keep that order in
-          <strong>Pending Payment</strong>
+          <strong coil:t="memberships_account.payment_notice_html">Pending Payment</strong>
           until settlement updates the same browser session.
         </p>
         <div coil:if="${account.has_customer_email}">
@@ -55,20 +52,20 @@
 
       <section class="memberships-page__summary" coil:if="${account.has_membership}">
         <article class="membership-card">
-          <p class="membership-card__eyebrow">Current tier</p>
+          <p class="membership-card__eyebrow" coil:t="memberships_account.current_tier_eyebrow">Current tier</p>
           <h2 coil:text="${membership_summary.tier_name}">Harbor Circle</h2>
           <p coil:text="${membership_summary.status}">Active</p>
           <p coil:text="${membership_summary.renewal_text}">
             Renewing on 18 April with early-access reservations.
           </p>
-          <a class="button" href="/account/orders">View order history</a>
+          <a class="button" href="/account/orders" coil:attr="href=${links.orders}" coil:t="memberships_account.view_orders">View order history</a>
         </article>
       </section>
 
       <section class="memberships-page__summary" coil:if="${account.has_pending_membership_order}">
         <article class="membership-card">
-          <p class="membership-card__eyebrow">Current tier</p>
-          <h2>Pending activation</h2>
+          <p class="membership-card__eyebrow" coil:t="memberships_account.current_tier_eyebrow">Current tier</p>
+          <h2 coil:t="memberships_account.pending_activation_title">Pending activation</h2>
           <p>
             Your latest order
             <strong coil:text="${account.latest_order_reference}">ORD-10042</strong>
@@ -86,14 +83,14 @@
 
       <section class="memberships-page__summary" coil:if="${account.needs_membership_purchase}">
         <article class="membership-card">
-          <p class="membership-card__eyebrow">Current tier</p>
-          <h2>Membership not active yet</h2>
+          <p class="membership-card__eyebrow" coil:t="memberships_account.current_tier_eyebrow">Current tier</p>
+          <h2 coil:t="memberships_account.inactive_title">Membership not active yet</h2>
           <p coil:text="${account.membership_empty_text}">
             Join to unlock early access, subscriber-only bundles, and concierge support.
           </p>
           <a
             class="button"
-            href="/en-GB/shop/collections/memberships"
+            href="/shop/collections/memberships"
             coil:attr="href=${account.membership_cta_url}"
           >
             Explore memberships
@@ -103,7 +100,7 @@
 
       <section class="memberships-page__summary" coil:if="${account.has_latest_order}">
         <article class="membership-card">
-          <p class="membership-card__eyebrow">Latest order</p>
+          <p class="membership-card__eyebrow" coil:t="memberships_account.latest_order_eyebrow">Latest order</p>
           <h2 coil:text="${account.latest_order_reference}">ORD-10042</h2>
           <p>
             Status
@@ -112,14 +109,14 @@
           <p coil:text="${account.state_summary}">
             Order and membership state are drawn from the live storefront session.
           </p>
-          <a class="button button--secondary" href="/account/orders">Review order history</a>
+          <a class="button button--secondary" href="/account/orders" coil:attr="href=${links.orders}" coil:t="memberships_account.review_orders">Review order history</a>
         </article>
       </section>
 
       <section class="memberships-page__summary">
         <article class="membership-card">
-          <p class="membership-card__eyebrow">Pass-backed access</p>
-          <h2>Passes and credit balances</h2>
+          <p class="membership-card__eyebrow" coil:t="memberships_account.passes_eyebrow">Pass-backed access</p>
+          <h2 coil:t="memberships_account.passes_title">Passes and credit balances</h2>
           <p coil:if="${account.has_pass_programs}">
             Memberships answer recurring access. Passes and credits cover finite uses like tasting
             seats, workshop bundles, or prepaid service balances.
@@ -137,14 +134,12 @@
               </p>
             </li>
           </ul>
-          <a class="button" href="/account/passes" coil:attr="href=${links.passes}">View passes and credits</a>
+          <a class="button" href="/account/passes" coil:attr="href=${links.passes}" coil:t="memberships_account.view_passes">View passes and credits</a>
         </article>
       </section>
 
       <div coil:replace="~{account/summary-panels :: panels}"></div>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

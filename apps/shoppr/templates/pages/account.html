@@ -12,10 +12,7 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section class="account-page">
         <section class="storefront-flash" coil:if="${has_flash_messages}">
@@ -24,7 +21,7 @@
           </article>
         </section>
         <div class="account-page__intro">
-          <p class="account-page__eyebrow">Customer account</p>
+          <p class="account-page__eyebrow" coil:t="account.eyebrow">Customer account</p>
           <h1 coil:text="${customer.display_name}">Welcome back to Shoppr.</h1>
           <p coil:text="${account.state_summary}">
             Use this account hub for orders, membership access, and repeat-purchase shortcuts that
@@ -47,7 +44,7 @@
           <p coil:if="${account.has_latest_order}">
             If you have just returned from the payment provider, this account can keep that order
             in
-            <strong>Pending Payment</strong>
+            <strong coil:t="account.payment_pending_notice">Pending Payment</strong>
             until the provider callback settles for this same browser session.
           </p>
           <div coil:if="${account.has_customer_email}">
@@ -65,7 +62,7 @@
 
         <div class="account-page__cards">
           <article class="account-card">
-            <h2>Memberships</h2>
+            <h2 coil:t="account.nav.memberships">Memberships</h2>
             <p coil:if="${account.has_membership}">
               <strong coil:text="${membership_summary.tier_name}">Harbor Circle</strong>
               <span coil:text="${membership_summary.status}">Active</span>
@@ -76,10 +73,10 @@
             <p coil:unless="${account.has_membership}" coil:text="${account.membership_empty_text}">
               No active membership is attached yet. Start from the storefront collection to join.
             </p>
-            <a class="button" href="/account/memberships">View memberships</a>
+            <a class="button" href="/account/memberships" coil:attr="href=${links.memberships}" coil:t="account.view_memberships_button">View memberships</a>
           </article>
           <article class="account-card">
-            <h2>Orders and storefront</h2>
+            <h2 coil:t="account.orders_heading">Orders and storefront</h2>
             <p coil:if="${account.has_recent_orders}">
               Review payment status, receipt details, and post-checkout next steps before heading
               back into the storefront. Pending Payment after a provider return means settlement is
@@ -88,10 +85,10 @@
             <p coil:unless="${account.has_recent_orders}" coil:text="${account.orders_empty_text}">
               Continue browsing the public catalog and landing content.
             </p>
-            <a class="button" href="/account/orders">View order history</a>
+            <a class="button" href="/account/orders" coil:attr="href=${links.orders}" coil:t="account.view_orders_button">View order history</a>
             <a
               class="button button--secondary"
-              href="/en-GB/shop"
+              href="/shop"
               coil:attr="href=${account.orders_cta_url}"
               coil:text="${account.orders_cta_label}"
             >
@@ -103,8 +100,6 @@
         <div coil:replace="~{account/summary-panels :: panels}"></div>
       </section>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

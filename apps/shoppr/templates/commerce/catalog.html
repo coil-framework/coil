@@ -1,96 +1,57 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="page_title='Shop Harbor'"
+  coil:with="page_title=t('catalog.meta_title')"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page_title}">Shoppr</title>
+    <title coil:text="${page_title}">Shoppr Townhouse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p>Catalog pages stay luxurious and merchandised while keeping the route graph obvious.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev">Dev Tools</a>
-          <a href="/admin">Admin</a>
-          <a href="/account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+  <body class="shoppr-shell shoppr-shell--elevated">
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section
         class="catalog-hero"
-        style="--catalog-hero-image:url('https://unsplash.com/photos/clothing-store-interior-with-racks-of-apparel-a-_PeeYVfQk/download?force=true&amp;w=1600&amp;q=80')"
+        style="--catalog-hero-image:url('/theme/assets/images/clothing-store-interior-with-racks-of-apparel-a-_PeeYVfQk.jpg')"
       >
         <div class="catalog-hero__scrim">
-          <p class="hero-eyebrow">Storefront catalog</p>
-          <h1>Start in campaign edits. Finish with a cart that feels immediate.</h1>
-          <p>
-            Shoppr’s catalog is built to look like a real premium retailer: strong imagery,
-            persuasive collection pages, fast product cards, and a checkout handoff that stays in the same public journey.
+          <p class="hero-eyebrow" coil:t="catalog.hero_eyebrow">The Catalog</p>
+          <h1 coil:t="catalog.hero_title">Discover the full collection.</h1>
+          <p coil:t="catalog.hero_summary">
+            Explore our complete range of premium urban essentials, designed to elevate your everyday wardrobe.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+            <a class="button" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="catalog.browse_edits">
               Browse edits
             </a>
-            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
-              Review cart
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">
+              Review bag
             </a>
           </div>
       </section>
 
       <section class="catalog-assurance">
         <article>
-          <h2>Choose the route that matches intent.</h2>
-          <p>
-            Campaign traffic should land in collection edits first. Customers who already know the
-            item they want can jump straight into product detail and add to cart from there.
+          <h2 coil:t="catalog.intent_title">Curated for you.</h2>
+          <p coil:t="catalog.intent_summary">
+            Start your journey through our carefully crafted seasonal edits, or explore individual pieces that catch your eye.
           </p>
         </article>
         <article>
-          <h2>Keep the basket moving.</h2>
-          <p>
-            Every browse surface should make the next step obvious: open an edit, inspect a
-            product, then move to cart without leaving the storefront shell.
+          <h2 coil:t="catalog.seamless_title">Seamless experience.</h2>
+          <p coil:t="catalog.seamless_summary">
+            From discovering new styles to completing your purchase, enjoy a refined and effortless shopping journey.
           </p>
         </article>
       </section>
@@ -99,10 +60,9 @@
 
       <section class="catalog-assurance">
         <article>
-          <h2>Prefer to shop by product?</h2>
-          <p>
-            Open a product page when the customer already knows the silhouette. Product detail keeps
-            price, quantity, collection context, and the cart handoff on one screen.
+          <h2 coil:t="catalog.product_title">Specific pieces.</h2>
+          <p coil:t="catalog.product_summary">
+            Already know what you're looking for? Browse our flagship products and exclusive releases.
           </p>
         </article>
       </section>
@@ -112,41 +72,21 @@
 
       <section class="catalog-assurance">
         <article>
-          <h2>Keep the storefront loop coherent.</h2>
-          <p>
-            The shortest path for a real customer is collection list to collection detail to
-            product detail to cart. Keep those pages prominent and the calls to action
-            obvious.
+          <h2 coil:t="catalog.loop_title">Continue your journey.</h2>
+          <p coil:t="catalog.loop_summary">
+            Explore more collections or review your selections before proceeding to checkout.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+            <a class="button" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="catalog.browse_all_edits">
               Browse all edits
             </a>
-            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
-              Review cart
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">
+              Review bag
             </a>
           </div>
         </article>
       </section>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Catalog shell</p>
-        <strong>Shoppr</strong>
-        <p coil:text="${site.settings.footer_body}">Collections, product cards, and cart flows share the same shell so the demo feels like one cohesive product.</p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow">Explore</p>
-        <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
-        <a href="/cart">Cart</a>
-        <a href="/account">Account</a>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow">Inspect</p>
-        <a href="/admin">Admin</a>
-        <a href="/__dev">Dev Tools</a>
-        <a href="/admin/catalog">Catalog admin</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

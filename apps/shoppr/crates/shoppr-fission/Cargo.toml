@@ -5,11 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["site"]
 site = ["coil/site"]
+web = ["site", "coil/web"]
 
 [dependencies]
 coil = { package = "coil-fission", version = "0.1.1", path = "../../../../crates/coil-fission", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"

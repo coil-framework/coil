@@ -13,6 +13,12 @@ readme = "README.md"
 [lib]
 name = "coil"
 
+[features]
+default = ["fission-server"]
+fission-server = ["coil-fission/server"]
+fission-site = ["coil-fission/site"]
+fission-web = ["coil-fission/web"]
+
 [dependencies]
 coil-admin = { version = "0.1.1", path = "../coil-admin" }
 coil-app = { version = "0.1.1", path = "../coil-app" }
@@ -23,7 +29,7 @@ coil-config = { version = "0.1.1", path = "../coil-config" }
 coil-core = { version = "0.1.1", path = "../coil-core" }
 coil-customer-sdk = { version = "0.1.1", path = "../coil-customer-sdk" }
 coil-events = { version = "0.1.1", path = "../coil-events" }
-coil-fission = { version = "0.1.1", path = "../coil-fission" }
+coil-fission = { version = "0.1.1", path = "../coil-fission", default-features = false }
 coil-media = { version = "0.1.1", path = "../coil-media" }
 coil-memberships = { version = "0.1.1", path = "../coil-memberships" }
 coil-ops = { version = "0.1.1", path = "../coil-ops" }

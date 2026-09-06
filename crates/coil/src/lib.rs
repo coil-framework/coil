@@ -33,6 +33,8 @@ pub use coil_fission::{
     fission, CoilPrincipal, CoilRequestScope, CoilSessionState, SiteDefinition, SiteRegistry,
     SiteRegistryError,
 };
+#[cfg(feature = "fission-server")]
+pub use coil_fission::public_revalidation;
 pub use coil_media as media;
 pub use coil_memberships as memberships;
 pub use coil_ops as ops;

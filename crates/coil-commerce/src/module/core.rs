@@ -118,7 +118,7 @@ impl CommerceModule {
         plan.insert(
             MigrationStep::new(
                 MigrationId::new("004_refunds")?,
-                owner,
+                owner.clone(),
                 40,
                 "create refund ledger and payment reconciliation tables",
             )?
@@ -127,6 +127,29 @@ impl CommerceModule {
             )?
             .with_statement(
                 "CREATE TABLE IF NOT EXISTS commerce_payment_reconciliation (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, provider TEXT NOT NULL, provider_reference TEXT NOT NULL, status TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at BIGINT NOT NULL)",
+            )?,
+        )?;
+        plan.insert(
+            MigrationStep::new(
+                MigrationId::new("005_catalog_publication")?,
+                owner,
+                50,
+                "create site-scoped catalogue publication and inventory tables",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_product_publications (product_id TEXT NOT NULL REFERENCES commerce_catalog_products(id), site_id TEXT NOT NULL, locale TEXT NOT NULL, summary TEXT NOT NULL, is_published BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL, PRIMARY KEY (product_id, site_id, locale))",
+            )?
+            .with_statement(
+                "CREATE INDEX IF NOT EXISTS commerce_product_publications_lookup ON commerce_product_publications (site_id, locale, is_published, product_id)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_collection_publications (collection_id TEXT NOT NULL REFERENCES commerce_collections(id), site_id TEXT NOT NULL, locale TEXT NOT NULL, label TEXT NOT NULL, summary TEXT NOT NULL, is_published BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL, PRIMARY KEY (collection_id, site_id, locale))",
+            )?
+            .with_statement(
+                "CREATE INDEX IF NOT EXISTS commerce_collection_publications_lookup ON commerce_collection_publications (site_id, locale, is_published, collection_id)",
+            )?
+            .with_statement(
+                "CREATE TABLE IF NOT EXISTS commerce_inventory_locations (product_id TEXT NOT NULL REFERENCES commerce_catalog_products(id), location_id TEXT NOT NULL, is_available BOOLEAN NOT NULL DEFAULT TRUE, updated_at BIGINT NOT NULL, PRIMARY KEY (product_id, location_id))",
             )?,
         )?;
         Ok(plan)

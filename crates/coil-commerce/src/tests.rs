@@ -1412,7 +1412,7 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
 
     let module = CommerceModule::new();
     let migrations = module.migration_plan().unwrap();
-    assert_eq!(migrations.ordered_steps().len(), 4);
+    assert_eq!(migrations.ordered_steps().len(), 5);
     assert_eq!(
         migrations.ordered_steps()[0].owner,
         MigrationOwner::Module("commerce".to_string())
@@ -1422,5 +1422,22 @@ fn commerce_module_exposes_queries_migrations_and_transaction_plans() {
             .ordered_steps()
             .iter()
             .all(|step| !step.statements.is_empty())
+    );
+    let publication = migrations
+        .ordered_steps()
+        .iter()
+        .find(|step| step.id.as_str() == "005_catalog_publication")
+        .expect("site-scoped catalogue publication migration");
+    assert!(
+        publication
+            .statements
+            .iter()
+            .any(|statement| statement.contains("commerce_product_publications"))
+    );
+    assert!(
+        publication
+            .statements
+            .iter()
+            .any(|statement| statement.contains("commerce_inventory_locations"))
     );
 }

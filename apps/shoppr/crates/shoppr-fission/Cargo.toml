@@ -1,0 +1,10 @@
+[package]
+name = "shoppr-fission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+coil = { package = "coil-fission", version = "0.1.1", path = "../../../../crates/coil-fission", default-features = false }
+serde.workspace = true

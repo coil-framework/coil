@@ -1,5 +1,4 @@
-mod model;
 mod repository;
 
-pub use model::*;
 pub use repository::*;
+pub use shoppr_fission::*;

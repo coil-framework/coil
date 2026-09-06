@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light;
+  --shoppr-paper: #f5f2ec;
+  --shoppr-ink: #171714;
+  --shoppr-muted: #69665f;
+  --shoppr-accent: #8f2f20;
+}
+
+html,
+body {
+  background: var(--shoppr-paper);
+  color: var(--shoppr-ink);
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: var(--shoppr-ink);
+  text-underline-offset: 0.22em;
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--shoppr-accent);
+}

@@ -1,9 +1,9 @@
-use super::model::{
-    CatalogCollection, CatalogProduct, CatalogRequest, CatalogResponse, ShopprJobError,
-};
 use coil_config::SiteConfig;
 use coil_data::{DataModelError, DataRuntime, PostgresDataClient};
 use coil_runtime::StorefrontCatalog;
+use shoppr_fission::{
+    CatalogCollection, CatalogProduct, CatalogRequest, CatalogResponse, ShopprJobError,
+};
 use sqlx::Row;
 
 #[derive(Clone)]

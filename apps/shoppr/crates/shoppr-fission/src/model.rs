@@ -51,6 +51,13 @@ impl ShopprJobError {
             message: message.into(),
         }
     }
+
+    pub fn invalid(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl std::fmt::Display for ShopprJobError {
@@ -73,3 +80,58 @@ impl JobSpec for CatalogJob {
 }
 
 pub const CATALOG_JOB: JobRef<CatalogJob> = JobRef::new(CatalogJob::NAME);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartRequest {
+    pub scope: CoilRequestScope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddCartItemRequest {
+    pub product_handle: String,
+    pub quantity: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartLine {
+    pub product_id: String,
+    pub product_handle: String,
+    pub title: String,
+    pub quantity: u32,
+    pub unit_price_minor: i64,
+    pub total_minor: i64,
+    pub currency: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartSnapshot {
+    pub item_count: u32,
+    pub subtotal_minor: i64,
+    pub currency: String,
+    pub lines: Vec<CartLine>,
+}
+
+#[derive(Debug)]
+pub struct CartReadJob;
+
+impl JobSpec for CartReadJob {
+    type Request = CartRequest;
+    type Ok = CartSnapshot;
+    type Err = ShopprJobError;
+
+    const NAME: &'static str = "shoppr.cart.read";
+}
+
+#[derive(Debug)]
+pub struct AddCartItemJob;
+
+impl JobSpec for AddCartItemJob {
+    type Request = AddCartItemRequest;
+    type Ok = CartSnapshot;
+    type Err = ShopprJobError;
+
+    const NAME: &'static str = "shoppr.cart.add";
+}
+
+pub const CART_READ_JOB: JobRef<CartReadJob> = JobRef::new(CartReadJob::NAME);
+pub const ADD_CART_ITEM_JOB: JobRef<AddCartItemJob> = JobRef::new(AddCartItemJob::NAME);

@@ -5,6 +5,7 @@ use std::fmt;
 pub enum LiveAuthError {
     ExplainApiDisabled,
     BackendInitialization { reason: String },
+    Authorization { reason: String },
     Explain { reason: String },
 }
 
@@ -16,6 +17,9 @@ impl fmt::Display for LiveAuthError {
             }
             Self::BackendInitialization { reason } => {
                 write!(f, "failed to initialize the live auth backend: {reason}")
+            }
+            Self::Authorization { reason } => {
+                write!(f, "failed to authorize capability: {reason}")
             }
             Self::Explain { reason } => {
                 write!(f, "failed to explain capability: {reason}")

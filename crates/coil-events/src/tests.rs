@@ -283,7 +283,7 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
             .expect("events migration plan")
             .ordered_steps()
             .len(),
-        3
+        4
     );
     assert!(
         module
@@ -293,6 +293,15 @@ fn module_manifest_and_admin_resources_match_events_workloads() {
             .statements
             .iter()
             .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS events_catalog"))
+    );
+    assert!(
+        module
+            .install_migration_plan()
+            .expect("events migration plan")
+            .ordered_steps()[3]
+            .statements
+            .iter()
+            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS event_publications"))
     );
     assert!(
         registry

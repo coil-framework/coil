@@ -204,7 +204,7 @@ Repo-maintainer conveniences are useful, but they are not the supported customer
 
 ## What To Read Next
 
-- [Configuration and secrets](configuration-and-secrets.md)
-- [Production topologies](production-topologies.md)
-- [Build and deploy](build-and-deploy.md)
-- [Customer project layout](../getting-started/customer-project-layout.md)
+- [Configuration and secrets](../configuration-and-secrets/)
+- [Production topologies](../production-topologies/)
+- [Build and deploy](../build-and-deploy/)
+- [Customer project layout](../getting-started/customer-project-layout/)

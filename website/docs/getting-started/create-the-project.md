@@ -462,4 +462,4 @@ What should happen:
 
 ## What To Read Next
 
-- [Understand the Runtime Shape](understand-the-runtime-shape.md)
+- [Understand the Runtime Shape](../understand-the-runtime-shape/)

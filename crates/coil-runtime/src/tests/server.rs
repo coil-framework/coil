@@ -4671,7 +4671,7 @@ async fn server_host_restores_checkout_after_payment_failure_webhook() {
         "{cart_body}"
     );
     assert!(cart_body.contains("/en-GB/shop/collections"), "{cart_body}");
-    assert!(cart_body.contains("Checkout"), "{cart_body}");
+    assert!(cart_body.contains("Proceed to checkout"), "{cart_body}");
 }
 
 #[tokio::test]
@@ -5415,7 +5415,7 @@ async fn server_host_executes_checked_in_harbor_shop_membership_storefront_flow(
         "{memberships_body}"
     );
     assert!(
-        memberships_body.contains("View membership details"),
+        memberships_body.contains("View benefits"),
         "{memberships_body}"
     );
 
@@ -5622,7 +5622,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
         account_body.contains("End browser session"),
         "{account_body}"
     );
-    assert!(account_body.contains("Open checkout"), "{account_body}");
+    assert!(account_body.contains("Proceed to checkout"), "{account_body}");
     assert!(account_body.contains("Continue shopping"), "{account_body}");
     assert!(
         account_body.contains("Explore memberships"),
@@ -5664,7 +5664,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
         "{order_history_body}"
     );
     assert!(
-        order_history_body.contains("No completed orders yet"),
+        order_history_body.contains("No recent orders to display"),
         "{order_history_body}"
     );
     assert!(
@@ -5672,7 +5672,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
         "{order_history_body}"
     );
     assert!(
-        order_history_body.contains("Open checkout"),
+        order_history_body.contains("Proceed to checkout"),
         "{order_history_body}"
     );
     assert!(
@@ -5711,7 +5711,7 @@ async fn server_host_bootstraps_checked_in_harbor_shop_account_entry_without_sig
         "{memberships_body}"
     );
     assert!(
-        memberships_body.contains("Membership not active yet"),
+        memberships_body.contains("Join Harbor Circle"),
         "{memberships_body}"
     );
     assert!(
@@ -5878,7 +5878,7 @@ async fn server_host_renders_checked_in_harbor_shop_catalog_collection_and_produ
     )
     .unwrap();
     assert_eq!(home_status, StatusCode::OK, "{home_body}");
-    assert!(home_body.contains("Browse collections"), "{home_body}");
+    assert!(home_body.contains("Explore the campaign"), "{home_body}");
     assert!(home_body.contains("/en-GB/shop/collections"), "{home_body}");
     assert!(!home_body.contains("href=\"/collections\""), "{home_body}");
 
@@ -6300,7 +6300,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         product_body.contains("value=\"gold-membership\""),
         "{product_body}"
     );
-    assert!(product_body.contains("Add to cart"), "{product_body}");
+    assert!(product_body.contains("Add to bag"), "{product_body}");
 
     let cart_bootstrap = server
         .respond(
@@ -6413,7 +6413,6 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
     .unwrap();
     assert!(checkout_body.contains("Gold Membership"), "{checkout_body}");
     assert!(checkout_body.contains("PAY-50001"), "{checkout_body}");
-    assert!(checkout_body.contains("Intent"), "{checkout_body}");
 
     let complete_response = server
         .respond(
@@ -6468,10 +6467,7 @@ async fn server_host_executes_checked_in_harbor_shop_customer_and_operator_journ
         confirmation_body.contains("ORD-10042"),
         "{confirmation_body}"
     );
-    assert!(
-        confirmation_body.contains("provider callback arrives"),
-        "{confirmation_body}"
-    );
+    assert!(confirmation_body.contains("provider callback arrives"), "{confirmation_body}");
     assert!(
         confirmation_body.contains("Pending Payment"),
         "{confirmation_body}"
@@ -8648,7 +8644,7 @@ async fn server_host_executes_checked_in_harbor_shop_stripe_checkout_handoff_and
     )
     .unwrap();
     assert!(product_body.contains("Gold Membership"), "{product_body}");
-    assert!(product_body.contains("Add to cart"), "{product_body}");
+    assert!(product_body.contains("Add to bag"), "{product_body}");
 
     let cart_bootstrap = server
         .respond(
@@ -10163,7 +10159,7 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
     assert_eq!(events_status, StatusCode::OK, "{events_body}");
     assert!(
         events_body.contains(
-            "Event discovery now lives in the same product as memberships and editorial pages."
+            "Join us at the Townhouse."
         ),
         "{events_body}"
     );
@@ -10218,7 +10214,7 @@ async fn server_host_renders_honest_checked_in_harbor_shop_events_surfaces() {
         "{event_detail_body}"
     );
     assert!(
-        event_detail_body.contains("Timeslots"),
+        event_detail_body.contains("Sessions Disponibles"),
         "{event_detail_body}"
     );
     assert!(
@@ -14256,11 +14252,11 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
     )
     .unwrap();
     assert!(
-        hidden_product_body.contains("This product is not currently available."),
+        hidden_product_body.contains("Currently out of stock."),
         "{hidden_product_body}"
     );
     assert!(
-        !hidden_product_body.contains("Add to cart"),
+        !hidden_product_body.contains("Add to bag"),
         "{hidden_product_body}"
     );
 
@@ -14337,7 +14333,7 @@ async fn server_host_can_hide_products_and_collections_from_checked_in_harbor_sh
     )
     .unwrap();
     assert!(
-        hidden_collection_body.contains("This collection is not currently available."),
+        hidden_collection_body.contains("Currently out of stock."),
         "{hidden_collection_body}"
     );
 }
@@ -14461,7 +14457,7 @@ async fn server_host_renders_live_completed_orders_on_checked_in_admin_orders_su
     assert!(body.contains("ORD-10042"), "{body}");
     assert!(body.contains("Pending Payment"), "{body}");
     assert!(body.contains("£89.00"), "{body}");
-    assert!(!body.contains("No completed orders yet"), "{body}");
+    assert!(!body.contains("No recent orders to display"), "{body}");
     assert!(body.contains("View details"), "{body}");
     assert!(body.contains("operator-live-orders@example.com"), "{body}");
 }

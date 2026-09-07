@@ -1,0 +1,160 @@
+:root {
+  color-scheme: light;
+  --coil-paper: #f7f4ed;
+  --coil-ink: #181816;
+  --coil-muted: #585650;
+  --coil-rule: #bfbaae;
+  --coil-rust: #be3c16;
+  --coil-cobalt: #1449b4;
+}
+
+html {
+  background: var(--coil-paper);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--coil-paper);
+  color: var(--coil-ink);
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+.fission-site-text-link a,
+.fission-site-nav-link a,
+.fission-site-article a {
+  color: var(--coil-cobalt);
+}
+
+.fission-site-root {
+  min-height: 100vh;
+  background: var(--coil-paper);
+}
+
+.fission-site-main > .fission-site-node {
+  width: min(1380px, calc(100vw - 72px));
+  margin-inline: auto;
+  padding-top: 28px;
+}
+
+.fission-site-heading-1 .fission-site-text-run,
+.fission-site-heading-2 .fission-site-text-run,
+.fission-site-section[id="top"] .fission-site-text-run {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: -0.045em;
+}
+
+.fission-site-header,
+.fission-site-footer {
+  width: 100%;
+}
+
+.fission-site-header {
+  border-bottom: 1px solid var(--coil-rule);
+}
+
+[data-fission-semantics="site-section:execution"],
+[data-fission-semantics="site-section:proof"],
+[data-fission-semantics="site-section:closing"] {
+  border-top: 1px solid var(--coil-rule);
+}
+
+.fission-site-header a,
+.fission-site-footer a,
+.fission-site-text-link,
+.fission-site-nav-link {
+  text-underline-offset: 5px;
+  text-decoration-thickness: 1px;
+}
+
+.fission-site-primary-link a {
+  text-decoration: none;
+}
+
+[data-fission-semantics="site-section:execution"] > .fission-site-box > .fission-site-row > .fission-site-box {
+  flex-basis: 25%;
+  min-width: 220px;
+}
+
+[data-fission-semantics="site-section:proof"] > .fission-site-box > .fission-site-row > .fission-site-box {
+  flex-basis: 50%;
+  min-width: 360px;
+}
+
+[data-fission-semantics="site-section:execution"] > .fission-site-box > .fission-site-row > .fission-site-box + .fission-site-box,
+[data-fission-semantics="site-section:proof"] > .fission-site-box > .fission-site-row > .fission-site-box + .fission-site-box {
+  border-left: 1px solid var(--coil-rule);
+}
+
+.fission-site-documentation {
+  background: var(--coil-paper);
+}
+
+.fission-site-nav,
+.fission-site-doc-header,
+.fission-site-sidebar,
+.fission-site-article,
+.fission-site-footer {
+  box-shadow: none !important;
+}
+
+.fission-site-doc-header,
+.fission-site-nav {
+  border-bottom-color: var(--coil-rule) !important;
+}
+
+.fission-site-article {
+  max-width: 78ch;
+}
+
+.fission-site-article h1,
+.fission-site-article h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: -0.025em;
+}
+
+.fission-site-article pre,
+.fission-site-article code {
+  border-radius: 2px !important;
+}
+
+@media (max-width: 900px) {
+  .fission-site-main > .fission-site-node {
+    width: min(100% - 36px, 1380px);
+    padding-top: 18px;
+  }
+
+  .fission-site-heading-1 [style] {
+    font-size: clamp(3rem, 14vw, 5.2rem) !important;
+    line-height: 0.98 !important;
+  }
+
+  [data-fission-semantics="site-section:execution"] > .fission-site-box > .fission-site-row > .fission-site-box {
+    flex-basis: 50%;
+    min-width: 280px;
+  }
+
+  [data-fission-semantics="site-section:proof"] > .fission-site-box > .fission-site-row > .fission-site-box {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  [data-fission-semantics="site-section:execution"] > .fission-site-box > .fission-site-row > .fission-site-box + .fission-site-box,
+  [data-fission-semantics="site-section:proof"] > .fission-site-box > .fission-site-row > .fission-site-box + .fission-site-box {
+    border-left: 0;
+    border-top: 1px solid var(--coil-rule);
+  }
+}
+
+@media (max-width: 560px) {
+  [data-fission-semantics="site-section:execution"] > .fission-site-box > .fission-site-row > .fission-site-box {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  [data-fission-semantics="site-nav-link:concepts"],
+  [data-fission-semantics="site-nav-link:architecture"] {
+    display: none;
+  }
+}

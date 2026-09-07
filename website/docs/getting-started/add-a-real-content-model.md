@@ -173,4 +173,4 @@ Then verify:
 
 ## What To Read Next
 
-- [Build Reusable Blocks](build-reusable-blocks.md)
+- [Build Reusable Blocks](../build-reusable-blocks/)

@@ -142,6 +142,11 @@ impl JobsCoordinationRuntime for ProductionPostgresSharedJobsCoordinationRuntime
         })
     }
 
+    fn cancel(&self, queue: &JobQueueName, job_id: &JobId) -> Result<bool, JobsModelError> {
+        self.store
+            .with_state_mut(&self.runtime, |state| state.cancel(queue, job_id))
+    }
+
     fn is_shared_backend(&self) -> bool {
         true
     }

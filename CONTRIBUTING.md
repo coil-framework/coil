@@ -32,6 +32,10 @@ These are platform-shaping areas and they need a documented argument, not just a
 
 ## Development Workflow
 
+The root workspace uses the Fission source checkout at
+`../../fission/fission`. Keep that checkout available rather than substituting
+a second UI runtime or vendored copy.
+
 ### Core workspace
 
 ```bash
@@ -57,9 +61,7 @@ cargo test --workspace
 ### Public docs
 
 ```bash
-cd website
-npm install
-npm run build
+cargo run -p coil-website -- build --project-dir website
 ```
 
 ## Pull Request Expectations

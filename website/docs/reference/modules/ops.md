@@ -123,5 +123,5 @@ the resulting admin surfaces as part of its operator walkthrough.
 
 ## Read Next
 
-- [Admin](./admin.md)
-- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations.md)
+- [Admin](./admin/)
+- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations/)

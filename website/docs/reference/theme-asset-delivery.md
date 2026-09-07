@@ -159,6 +159,6 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Theme Structure](./theme-structure.md)
-- [Template Models](./template-models.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
+- [Theme Structure](./theme-structure/)
+- [Template Models](./template-models/)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets/)

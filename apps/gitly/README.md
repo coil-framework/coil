@@ -7,13 +7,14 @@ points to show that the framework is modular.
 
 It demonstrates:
 
-- customer-owned templates and theme assets
+- customer-owned Fission widgets rendered through Fission SSR
+- a focused browser search island instead of a page-wide client application
 - a linked Rust backend crate
 - bounded runtime-installed WASM packages
 - custom GitHub-style API routes
 - a real scheduled-job extension contract plus runtime-derived scheduler state on the Actions page
-- localized routes plus client-side multilingual frontend copy in `en-GB`, `fr-FR`, and `de-DE`
-- light, dark, and system theme switching from the frontend with local persistence
+- localized routes and server-rendered copy in `en-GB`, `fr-FR`, and `de-DE`
+- Fission-native light and dark theme switching with local persistence
 
 ## Quick Start
 
@@ -61,12 +62,12 @@ single-site Gitly stack stays self-contained in the same way Shoppr's multi-site
 
 What you should see:
 
-- a GitHub-like shell with accessible navigation
-- theme switching between light, dark, and system
+- an accessible forge-shaped Fission interface
+- persisted light and dark theme switching
 - language switching between English, French, and German
-- static repository, organization, and profile surfaces
-- custom API-driven summary cards
-- a WASM-backed community pulse endpoint
+- server-rendered repository, organization, profile, and workflow surfaces
+- a bounded search island over the checked-in demonstration index
+- host-scoped JSON API routes
 - a runtime-derived scheduled-job surface for GitHub Actions
 
 ## What Lives Where
@@ -77,15 +78,11 @@ What you should see:
 `platform.dev.toml`
 - local runtime config for HTTP, database, Redis, storage, jobs, and observability
 
-`templates/gitly/`
-- the public GitHub-style pages
+`crates/gitly-fission/`
+- the portable Fission state, widgets, translations, and search island
 
-`theme/assets/site.css`
-- the GitHub-inspired light/dark design system and responsive layout
-
-`theme/assets/site.js`
-- locale switching, theme switching, client-side API hydration, and the customer-owned translation
-  dictionary used by the demo shell
+`theme/`
+- customer-owned static assets that are published independently of the Fission widget tree
 
 `crates/gitly-backend/`
 - the linked customer-owned Rust backend
@@ -159,8 +156,10 @@ Gitly exposes GitHub-style demo endpoints:
 - `/api/github/user`
 - `/api/github/pulse`
 
-The first five are mounted by the customer app in Rust. The last one is fulfilled through the WASM
-extension boundary.
+The Fission server mounts these read-only demonstration endpoints in Rust and derives the workflow
+payload from Coil's assembled scheduler and extension state. The installed WASM packages remain
+hash-pinned and validated by the customer runtime; their browser/server execution is deliberately
+kept outside the server-rendered page tree.
 
 ## Local Host And Asset Notes
 
@@ -193,10 +192,12 @@ For direct local runs, the important runtime inputs are still the same ones used
 If you are new to Coil, read these in order:
 
 1. `app.toml`
-2. `crates/gitly-app/src/lib.rs`
-3. `crates/gitly-backend/src/lib.rs`
-4. `extensions/gitly-community-pulse/package.toml`
-5. `extensions/gitly-actions-scheduler/package.toml`
-6. `templates/gitly/`
+2. `crates/gitly-fission/src/ui.rs`
+3. `crates/gitly-app/src/fission_app.rs`
+4. `crates/gitly-app/src/lib.rs`
+5. `crates/gitly-backend/src/lib.rs`
+6. `extensions/gitly-community-pulse/package.toml`
+7. `extensions/gitly-actions-scheduler/package.toml`
 
-That path shows the entire customer-app story without needing to understand the wider repo first.
+That path shows the portable UI, Fission server boundary, Coil composition, linked Rust logic, and
+bounded WASM packages without requiring the wider repository first.

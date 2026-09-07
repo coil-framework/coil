@@ -271,6 +271,6 @@ boundaries.
 
 ## What To Read Next
 
-- [Build and deploy](build-and-deploy.md)
-- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
-- [Webhooks and integrations](webhooks-and-integrations.md)
+- [Build and deploy](../build-and-deploy/)
+- [Asset publication and CDN delivery](../asset-publication-and-cdn-delivery/)
+- [Webhooks and integrations](../webhooks-and-integrations/)

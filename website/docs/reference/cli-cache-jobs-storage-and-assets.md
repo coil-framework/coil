@@ -117,5 +117,5 @@ cargo run -p shoppr -- assets publish
 
 ## Read Next
 
-- [CLI Commands](./cli-commands.md)
-- [Customer Workspace Binaries](./customer-workspace-binaries.md)
+- [CLI Commands](./cli-commands/)
+- [Customer Workspace Binaries](./customer-workspace-binaries/)

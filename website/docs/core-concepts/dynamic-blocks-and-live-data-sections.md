@@ -159,9 +159,9 @@ loading or dispatch logic is secretly implemented.
 
 ## Where To Look Next
 
-- [Content schema vs content instances](./content-schema-vs-content-instances.md)
-- [Render pipeline and model composition](./render-pipeline-and-model-composition.md)
-- [CMS page builder model](../reference/cms-page-builder-model.md)
-- [Render model hooks](../reference/render-model-hooks.md)
-- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks.md)
-- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)
+- [Content schema vs content instances](./content-schema-vs-content-instances/)
+- [Render pipeline and model composition](./render-pipeline-and-model-composition/)
+- [CMS page builder model](../reference/cms-page-builder-model/)
+- [Render model hooks](../reference/render-model-hooks/)
+- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks/)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks/)

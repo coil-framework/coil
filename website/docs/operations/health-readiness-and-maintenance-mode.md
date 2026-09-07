@@ -120,6 +120,6 @@ Bypass should be narrow, explicit, and operationally controlled.
 
 ## What To Read Next
 
-- [Observability, monitoring, and audit](observability.md)
-- [Cache, TLS, cutover, and rollback](cache-tls-cutover-and-rollback.md)
-- [Troubleshooting](troubleshooting.md)
+- [Observability, monitoring, and audit](../observability/)
+- [Cache, TLS, cutover, and rollback](../cache-tls-cutover-and-rollback/)
+- [Troubleshooting](../troubleshooting/)

@@ -1,76 +1,36 @@
 <!doctype html>
 <html
   xmlns:coil="https://coil.rs"
-  coil:with="page_title='Cart'"
+  coil:with="page_title=t('cart.meta_title')"
   lang="en-GB"
   coil:attr="lang=${locale}"
 >
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page.title}">Cart</title>
+    <title coil:text="${page.title}">Shopping Bag | Shoppr Townhouse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p>Cart stays inside the same public shell so the journey never feels like a context switch.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev">Dev Tools</a>
-          <a href="/admin">Admin</a>
-          <a href="/account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+  <body class="shoppr-shell shoppr-shell--elevated">
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main cart-page">
       <section class="cart-page__intro">
-        <p class="cart-page__eyebrow">Cart</p>
-        <p>
-          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
-          <span>/</span>
-          <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">Collections</a>
-          <span>/</span>
-          <span>Cart</span>
+        <p class="cart-page__eyebrow" coil:t="cart.eyebrow">Your Bag</p>
+        <p class="breadcrumbs">
+          <a href="/shop" coil:attr="href=${links.catalog}" coil:t="product.copy.shop">Shop</a>
+          <span class="separator">/</span>
+          <a href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">Collections</a>
+          <span class="separator">/</span>
+          <span coil:t="cart.eyebrow">Bag</span>
         </p>
-        <h1>Review the basket before moving to payment.</h1>
-        <p>
-          Use this page to adjust quantities, jump back into a product, or return to the
-          collection that item came from before moving into checkout.
-        </p>
+        <h1 coil:t="cart.title">Review your selections.</h1>
       </section>
       <section class="storefront-flash" coil:if="${has_flash_messages}">
         <article class="storefront-flash__message" coil:each="message : ${flash_messages}">
@@ -93,19 +53,19 @@
       </section>
       <div class="cart-page__grid">
         <section class="cart-card">
-          <h2>Items</h2>
+          <h2 coil:t="cart.items_heading">Items</h2>
           <form class="commerce-form cart-update-form" action="/cart" method="post" coil:if="${has_cart_items}">
             <input type="hidden" name="cart_action" value="update" />
             <ul class="cart-lines">
               <li class="cart-line" coil:each="item : ${cart_items}">
                 <div>
                   <p class="cart-line__eyebrow" coil:if="${item.has_product_link}">
-                    <a href="/en-GB/shop/collections/featured" coil:attr="href=${item.collection_url}" coil:text="${item.collection_name}">
+                    <a href="/shop/collections/featured" coil:attr="href=${item.collection_url}" coil:text="${item.collection_name}">
                       Featured
                     </a>
                   </p>
                   <strong coil:if="${item.has_product_link}">
-                    <a href="/en-GB/shop/products/harbor-cap" coil:attr="href=${item.product_url}" coil:text="${item.title}">
+                    <a href="/shop/products/harbor-cap" coil:attr="href=${item.product_url}" coil:text="${item.title}">
                       Harbor Cap
                     </a>
                   </strong>
@@ -113,7 +73,7 @@
                   <p coil:text="${item.variant}">Canvas cap</p>
                 </div>
                 <label class="commerce-form__field commerce-form__field--compact">
-                  <span>Qty</span>
+                  <span coil:t="cart.quantity_label">Qty</span>
                   <input
                     type="number"
                     name="quantity"
@@ -129,65 +89,35 @@
               </li>
             </ul>
             <div class="cart-page__actions">
-              <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
-                Browse collections
+              <a class="button button--secondary" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="cart.continue_shopping">
+                Continue shopping
               </a>
-              <button class="button button--secondary" type="submit">Update cart</button>
+              <button class="button button--secondary" type="submit" coil:t="cart.update_button">Update bag</button>
             </div>
           </form>
           <div class="cart-card__empty" coil:unless="${has_cart_items}">
-            <p>Your cart is empty right now.</p>
-            <p>Browse the catalog, add a product, then return here to review totals before checkout.</p>
+            <p>Your bag is currently empty.</p>
             <div class="cart-page__actions">
-              <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
-                Browse collections
-              </a>
-              <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
-                Open full catalog
+              <a class="button" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="cart.continue_shopping">
+                Continue shopping
               </a>
             </div>
           </div>
         </section>
         <aside class="cart-card">
-          <h2>Summary</h2>
-          <p><span>Subtotal</span><strong coil:text="${cart_summary.subtotal}">GBP 118</strong></p>
-          <p><span>Delivery</span><strong coil:text="${cart_summary.shipping}">GBP 0</strong></p>
-          <p><span>Total</span><strong coil:text="${cart_summary.total}">GBP 118</strong></p>
+          <h2 coil:t="cart.summary_heading">Order Summary</h2>
+          <p><span coil:t="cart.subtotal_label">Subtotal</span><strong coil:text="${cart_summary.subtotal}">GBP 118</strong></p>
+          <p><span coil:t="cart.delivery_label">Estimated Delivery</span><strong coil:text="${cart_summary.shipping}">GBP 0</strong></p>
+          <p><span coil:t="cart.total_label">Total</span><strong coil:text="${cart_summary.total}">GBP 118</strong></p>
           <div class="cart-page__actions" coil:if="${has_cart_items}">
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input type="hidden" name="cart_intent" value="reviewed" />
-              <button class="button" type="submit">Checkout</button>
+              <button class="button" type="submit" coil:t="cart.checkout_button">Proceed to checkout</button>
             </form>
-            <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
-              Browse collections
-            </a>
-            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
-              Full catalog
-            </a>
-          </div>
-          <div class="cart-page__actions" coil:unless="${has_cart_items}">
-            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
-              Browse collections
-            </a>
-            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
-              Full catalog
-            </a>
           </div>
         </aside>
       </div>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Cart shell</p>
-        <strong>Shoppr</strong>
-        <p coil:text="${site.settings.footer_body}">Quantity changes, flash messages, and checkout handoff all stay readable without leaving the public storefront.</p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow">Inspect</p>
-        <a href="/account">Account</a>
-        <a href="/admin">Admin</a>
-        <a href="/__dev">Dev Tools</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod extensions;
+pub mod fission_app;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -314,6 +315,13 @@ fn discover_workspace_root(start: Option<&Path>) -> Option<PathBuf> {
 }
 
 impl ShopprBootstrap {
+    pub fn fission_server_app(&self) -> Result<coil::fission::server::FissionServerApp> {
+        let jobs = fission_app::postgres_server_jobs(&self.runtime_plan.runtime.data)
+            .context("failed to register Shoppr's PostgreSQL Fission jobs")?;
+        fission_app::shoppr_server_app(&self.app_root, &self.runtime_plan.runtime.config, jobs)
+            .context("failed to build Shoppr's Fission server app")
+    }
+
     pub fn server_host<R: SecretResolver>(
         &self,
         resolver: &R,
@@ -394,6 +402,16 @@ impl ShopprBootstrap {
                 .context("failed to apply Shoppr migrations")?;
             execution.statements_executed
         };
+        let catalog_repository =
+            fission_app::PostgresCatalogRepository::connect(&self.runtime_plan.runtime.data)
+                .context("failed to prepare the Shoppr catalogue repository")?;
+        tokio_runtime
+            .block_on(catalog_repository.seed_if_empty(
+                &self.runtime_plan.runtime.storefront_catalog,
+                &self.runtime_plan.runtime.config.sites,
+            ))
+            .map_err(anyhow::Error::msg)
+            .context("failed to seed the Shoppr catalogue authority")?;
 
         Ok(ShopprMigrationApplyReport {
             app_id: self.manifest.id.to_string(),

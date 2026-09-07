@@ -160,6 +160,6 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Accessibility](../reference/accessibility.md)
-- [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
-- [Template Language](../reference/template-language.md)
+- [Accessibility](../reference/accessibility/)
+- [Themes, Rendering, And Assets](./themes-rendering-and-assets/)
+- [Template Language](../reference/template-language/)

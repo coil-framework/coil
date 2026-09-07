@@ -248,7 +248,7 @@ A customer app should commit:
 
 ## Read Next
 
-- [CLI Commands](./cli-commands.md)
-- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
-- [Composition And coil](./composition.md)
-- [Shoppr Checkout And Operations](../use-cases/shoppr/checkout-and-operations.md)
+- [CLI Commands](./cli-commands/)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import/)
+- [Composition And coil](./composition/)
+- [Shoppr Checkout And Operations](../use-cases/shoppr/checkout-and-operations/)

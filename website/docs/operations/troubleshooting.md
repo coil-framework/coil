@@ -190,7 +190,7 @@ Check:
 Concrete Shoppr examples:
 
 - payment callback: `/webhooks/commerce/payment-provider`
-- sidecar CRM example: `POST http://localhost:8081/webhooks/crm/contact-updated`
+- sidecar CRM example: `POST http://localhost:8091/webhooks/crm/contact-updated`
 - secrets in `apps/shoppr/.env.example`
 
 ## Extension Problems
@@ -243,6 +243,6 @@ During troubleshooting:
 
 ## What To Read Next
 
-- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
-- [Webhooks and integrations](webhooks-and-integrations.md)
-- [Database migrations](database-migrations.md)
+- [Health, readiness, and maintenance mode](../health-readiness-and-maintenance-mode/)
+- [Webhooks and integrations](../webhooks-and-integrations/)
+- [Database migrations](../database-migrations/)

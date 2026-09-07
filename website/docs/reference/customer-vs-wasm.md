@@ -273,7 +273,7 @@ Workspace packaging examples:
 
 ## Read Next
 
-- [Composition And `coil`](./composition.md)
-- [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend.md)
-- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions.md)
-- [Gitly API And Background Work](../use-cases/gitly/api-and-background-work.md)
+- [Composition And `coil`](./composition/)
+- [Shoppr Linked Rust Backend](../use-cases/shoppr/linked-rust-backend/)
+- [Shoppr WASM Extensions](../use-cases/shoppr/wasm-extensions/)
+- [Gitly API And Background Work](../use-cases/gitly/api-and-background-work/)

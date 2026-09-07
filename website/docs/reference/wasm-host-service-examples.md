@@ -2,7 +2,7 @@
 title: WASM Host Service Examples
 ---
 
-This page is the practical companion to [WASM Host APIs](./wasm-host-apis.md).
+This page is the practical companion to [WASM Host APIs](./wasm-host-apis/).
 
 The goal is simple: show what the host surfaces mean in use, not just list them.
 
@@ -158,6 +158,6 @@ That is the line between bounded extension and first-party product code.
 
 ## Read Next
 
-- [WASM Host APIs](./wasm-host-apis.md)
-- [Writing And Installing WASM Extensions](./wasm-writing-and-installing-extensions.md)
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
+- [WASM Host APIs](./wasm-host-apis/)
+- [Writing And Installing WASM Extensions](./wasm-writing-and-installing-extensions/)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm/)

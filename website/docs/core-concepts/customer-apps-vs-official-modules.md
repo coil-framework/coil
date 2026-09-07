@@ -146,7 +146,7 @@ They are runtime batteries, not just UI packages.
 
 ## Read Next
 
-- [Runtime and module composition](runtime-and-module-composition.md)
-- [Official modules](../reference/modules.md)
-- [Customer project layout](../getting-started/customer-project-layout.md)
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
+- [Runtime and module composition](../runtime-and-module-composition/)
+- [Official modules](../reference/modules/)
+- [Customer project layout](../getting-started/customer-project-layout/)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)

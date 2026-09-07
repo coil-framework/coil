@@ -1,10 +1,9 @@
 <section class="collection-grid" xmlns:coil="https://coil.rs" coil:fragment="grid">
   <header class="collection-grid__header">
-    <p class="collection-grid__eyebrow">Campaign edits</p>
-    <h2>Shop the campaign first, then narrow into the product decision.</h2>
-    <p class="collection-grid__intro">
-      Collections are the merchandising layer. They set the mood, hold the campaign copy, and keep
-      the customer inside the right assortment before the product page takes over.
+    <p class="collection-grid__eyebrow" coil:t="collections.grid_eyebrow">The Edit</p>
+    <h2 coil:t="collections.grid_title">Curated essentials for the season.</h2>
+    <p class="collection-grid__intro" coil:t="collections.grid_intro">
+      Explore our latest arrivals, carefully selected to build a versatile urban wardrobe.
     </p>
   </header>
   <div class="collection-grid__list" coil:if="${has_catalog_sections}">
@@ -19,29 +18,29 @@
         Start here for the campaign promise, then open a product page for price, sizing, quantity,
         and cart actions.
       </p>
-      <a class="button" href="/shop/collections/featured" coil:href="${section.url}">
-        Open edit
+      <a class="button" href="/shop/collections/featured" coil:href="${section.url}" coil:t="collections.open_edit">
+        Explore the edit
       </a>
     </article>
   </div>
   <div class="collection-grid__list" coil:unless="${has_catalog_sections}">
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">New season</p>
-      <h3>Featured</h3>
-      <p>Start with the campaign edit before narrowing into individual product detail pages.</p>
-      <a class="button" href="/en-GB/shop/collections/featured">Open edit</a>
+      <p class="catalog-section__eyebrow" coil:t="collections.featured_eyebrow">New Arrivals</p>
+      <h3 coil:t="collections.featured_title">Spring Capsule</h3>
+      <p coil:t="collections.featured_summary">Lightweight and versatile pieces for the changing weather.</p>
+      <a class="button" href="/shop/collections/featured" coil:t="collections.open_edit">Explore the edit</a>
     </article>
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">Loyalty</p>
-      <h3>Memberships</h3>
-      <p>Lead customers directly into recurring products and their account-linked benefits.</p>
-      <a class="button" href="/en-GB/shop/collections/memberships">Open edit</a>
+      <p class="catalog-section__eyebrow" coil:t="collections.memberships_eyebrow">Harbor Circle</p>
+      <h3 coil:t="collections.memberships_title">Exclusive Access</h3>
+      <p coil:t="collections.memberships_summary">Members-only pieces and early access to upcoming drops.</p>
+      <a class="button" href="/shop/collections/memberships" coil:t="collections.open_edit">Explore the edit</a>
     </article>
     <article class="catalog-section collection-grid__item">
-      <p class="catalog-section__eyebrow">City edit</p>
-      <h3>Events</h3>
-      <p>Use a tighter event-focused edit when the customer is shopping for attendance or passes.</p>
-      <a class="button" href="/en-GB/shop/collections/events">Open edit</a>
+      <p class="catalog-section__eyebrow" coil:t="collections.events_eyebrow">Community</p>
+      <h3 coil:t="collections.events_title">In-Store Events</h3>
+      <p coil:t="collections.events_summary">Join us for styling workshops, product launches, and community gatherings.</p>
+      <a class="button" href="/events" coil:t="collections.open_edit">Explore the edit</a>
     </article>
   </div>
 </section>

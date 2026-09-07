@@ -53,5 +53,5 @@ Use `init` when:
 
 ## Read Next
 
-- [cargo coil new](./cargo-coil-new.md)
-- [cargo coil apply](./cargo-coil-apply.md)
+- [cargo coil new](./cargo-coil-new/)
+- [cargo coil apply](./cargo-coil-apply/)

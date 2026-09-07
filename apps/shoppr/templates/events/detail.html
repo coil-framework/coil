@@ -7,10 +7,7 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor events">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main">
       <section class="home-page events-page" coil:if="${has_event}">
         <article class="catalog-section">
@@ -41,7 +38,7 @@
             Priority note.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/events" coil:attr="href=${links.events}">Back to events</a>
+            <a class="button" href="/events" coil:attr="href=${links.events}" coil:t="events.back_to_events">Back to events</a>
             <a class="button button--secondary" href="/account" coil:attr="href=${links.account}">
               Open account
             </a>
@@ -52,8 +49,8 @@
         </article>
 
         <article class="catalog-section">
-          <p class="catalog-section__eyebrow">Timeslots</p>
-          <h2>Choose the right session before booking starts</h2>
+          <p class="catalog-section__eyebrow" coil:t="events.timeslots_eyebrow">Timeslots</p>
+          <h2 coil:t="events.timeslots_title">Choose the right session before booking starts</h2>
           <ol class="account-panel__list" coil:if="${event.has_timeslots}">
             <li coil:each="timeslot : ${event.timeslots}">
               <div>
@@ -89,8 +86,8 @@
 
       <section class="home-page events-page" coil:unless="${has_event}">
         <article class="catalog-section">
-          <p class="catalog-section__eyebrow">Event detail</p>
-          <h1>Event unavailable</h1>
+          <p class="catalog-section__eyebrow" coil:t="events.unavailable_eyebrow">Event detail</p>
+          <h1 coil:t="events.unavailable_title">Event unavailable</h1>
           <p>
             The requested event slug is not currently available for this site or locale.
           </p>
@@ -99,8 +96,8 @@
             <strong coil:text="${missing_event_slug}">unknown-event</strong>
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/events" coil:attr="href=${links.events}">Back to events</a>
-            <a class="button button--secondary" href="/en-GB/shop/collections/events" coil:attr="href=${links.events_collection}">
+            <a class="button" href="/events" coil:attr="href=${links.events}" coil:t="events.back_to_events">Back to events</a>
+            <a class="button button--secondary" href="/shop/collections/events" coil:attr="href=${links.events_collection}">
               Browse event-linked offers
             </a>
           </div>

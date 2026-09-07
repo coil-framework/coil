@@ -69,7 +69,7 @@ Base commerce relies mostly on shared config:
 - template loading
 
 Payment-provider configuration is handled by add-on modules such as
-[`commerce-payments-stripe`](./commerce-payments-stripe.md).
+[`commerce-payments-stripe`](./commerce-payments-stripe/).
 
 ## Routes And Surfaces
 
@@ -152,6 +152,6 @@ Shoppr is the canonical example:
 
 ## Read Next
 
-- [Commerce Payments Stripe](./commerce-payments-stripe.md)
-- [Memberships](./memberships.md)
-- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations.md)
+- [Commerce Payments Stripe](./commerce-payments-stripe/)
+- [Memberships](./memberships/)
+- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations/)

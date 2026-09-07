@@ -8,54 +8,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page.title}">Product detail</title>
+    <title coil:text="${page.title}">Product detail | Shoppr Townhouse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p coil:t="product.utility.summary">Product detail shows the interactive layer directly: gallery switching, accordions, quantity, and fast cart handoff.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
-          <a href="/admin" coil:t="shell.utility.admin">Admin</a>
-          <a href="/account" coil:t="shell.utility.account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+  <body class="shoppr-shell shoppr-shell--elevated">
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main product-page">
       <section class="product-page__hero" coil:if="${has_product}">
         <div class="product-page__media">
@@ -85,13 +49,13 @@
         </div>
         <div class="product-page__details">
           <p class="product-page__eyebrow">
-            <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">Collections</a>
+            <a href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">Collections</a>
           </p>
-          <p>
-            <a href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="product.copy.shop">Shop</a>
-            <span>/</span>
-            <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">Collections</a>
-            <span>/</span>
+          <p class="breadcrumbs">
+            <a href="/shop" coil:attr="href=${links.catalog}" coil:t="product.copy.shop">Shop</a>
+            <span class="separator">/</span>
+            <a href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">Collections</a>
+            <span class="separator">/</span>
             <a
               href="/shop/collections/featured"
               coil:href="${product.collection_url}"
@@ -102,10 +66,9 @@
           </p>
           <h1 coil:text="${product.name}">Harbor Cap</h1>
           <p class="product-page__price" coil:text="${product.price}">GBP 29</p>
-          <p class="product-page__availability" coil:t="product.copy.availability">Available in UK, France, and Poland with local route switching from the header.</p>
-          <p coil:text="${product.summary}">
-            Product detail is where the customer confirms the exact item before moving into the
-            cart or going straight to checkout.
+          <p class="product-page__availability" coil:t="product.copy.availability">Available online and at our London, Paris, and Warsaw locations.</p>
+          <p class="product-page__summary" coil:text="${product.summary}">
+            Crafted from premium materials, designed to wear in, not out.
           </p>
           <div class="size-picker" aria-label="Size selection">
             <button class="size-pill is-active" type="button" aria-pressed="true">XS</button>
@@ -131,7 +94,7 @@
                 <span coil:t="product.copy.quantity">Quantity</span>
                 <input type="number" name="quantity" min="1" value="1" />
               </label>
-              <button class="button" type="submit" coil:t="product.copy.add_to_cart">Add to cart</button>
+              <button class="button" type="submit" coil:t="product.copy.add_to_cart">Add to bag</button>
             </form>
             <form class="commerce-form commerce-form--inline" action="/checkout/start" method="post">
               <input
@@ -141,59 +104,52 @@
                 coil:attr="value=${product.slug}"
               />
               <input type="hidden" name="quantity" value="1" />
-              <button class="button button--secondary" type="submit" coil:t="product.copy.buy_now">Buy now</button>
+              <button class="button button--secondary" type="submit" coil:t="product.copy.buy_now">Purchase now</button>
             </form>
           </div>
           <div class="checkout-actions">
             <a class="button button--secondary" href="/shop/collections/featured" coil:href="${product.collection_url}" coil:t="product.copy.back_to_collection">Back to collection</a>
-            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">Review cart</a>
+            <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">Review bag</a>
           </div>
           <div class="accordion-group">
             <section class="accordion-item">
-              <button class="accordion-trigger" type="button" aria-expanded="true" coil:t="product.accordions.description.title">Description</button>
+              <button class="accordion-trigger" type="button" aria-expanded="true" coil:t="product.accordions.description.title">Details &amp; Care</button>
               <div class="accordion-panel is-open">
-                <p coil:t="product.accordions.description.body">Structured product content can stay server-rendered while accordions layer the interactive behavior on top.</p>
+                <p coil:t="product.accordions.description.body">Crafted from premium materials. Dry clean only. Designed to wear in, not out.</p>
               </div>
             </section>
             <section class="accordion-item">
-              <button class="accordion-trigger" type="button" aria-expanded="false" coil:t="product.accordions.delivery.title">Delivery and payments</button>
+              <button class="accordion-trigger" type="button" aria-expanded="false" coil:t="product.accordions.delivery.title">Delivery &amp; Returns</button>
               <div class="accordion-panel" hidden="hidden">
-                <p coil:t="product.accordions.delivery.body">Delivery messaging and payment options can vary per market without changing the core route family.</p>
+                <p coil:t="product.accordions.delivery.body">Complimentary standard delivery over £150. Express options available. Free returns within 30 days.</p>
               </div>
             </section>
             <section class="accordion-item">
-              <button class="accordion-trigger" type="button" aria-expanded="false" coil:t="product.accordions.availability.title">Market availability</button>
+              <button class="accordion-trigger" type="button" aria-expanded="false" coil:t="product.accordions.availability.title">In-Store Availability</button>
               <div class="accordion-panel" hidden="hidden">
-                <p coil:t="product.accordions.availability.body">Use sites for true inventory or merchandising divergence. Use locales when the assortment is shared.</p>
+                <p coil:t="product.accordions.availability.body">Check stock at your nearest Shoppr Townhouse location.</p>
               </div>
             </section>
           </div>
         </div>
       </section>
 
-      <section class="catalog-assurance" coil:if="${has_product}">
-        <article>
-          <h2 coil:t="product.assurance.title">Next step: add to cart or keep browsing this collection</h2>
-          <p coil:t="product.assurance.summary">Customers should not have to hunt for the next action here. Keep the cart handoff and the route back to the collection visible at the same time.</p>
-        </article>
-      </section>
-
       <section class="catalog-assurance" coil:unless="${has_product}">
         <article>
-          <h1 coil:t="product.unavailable.title">This product is not currently available.</h1>
-          <p coil:t="product.unavailable.summary">Shoppr has removed this item from the live storefront. Return to the current catalog or collections view to keep shopping.</p>
+          <h1 coil:t="product.unavailable.title">Currently out of stock.</h1>
+          <p coil:t="product.unavailable.summary">This item is currently unavailable. Join the waitlist to be notified when it returns.</p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="product.unavailable.catalog">Open catalog</a>
-            <a class="button button--secondary" href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="product.unavailable.collections">Browse collections</a>
+            <a class="button" href="/shop" coil:attr="href=${links.catalog}" coil:t="product.unavailable.catalog">Back to shop</a>
+            <a class="button button--secondary" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.unavailable.collections">Browse collections</a>
           </div>
         </article>
       </section>
 
-      <section class="product-grid" coil:if="${has_product_cards}">
+      <section class="product-grid" coil:if="${has_product and has_product_cards}">
         <header class="product-grid__header">
-          <p class="product-grid__eyebrow" coil:t="product.related.eyebrow">More from this collection</p>
-          <h2 coil:t="product.related.title">Continue browsing nearby products</h2>
-          <p coil:t="product.related.summary">Related products keep the customer inside the same merchandising context without throwing them back to the top of the catalog.</p>
+          <p class="product-grid__eyebrow" coil:t="product.related.eyebrow">Curated for you</p>
+          <h2 coil:t="product.related.title">You might also like</h2>
+          <p coil:t="product.related.summary">Pieces that complement your selection.</p>
         </header>
         <ul class="product-grid__list">
           <li class="product-grid__item" coil:each="related : ${product_cards}">
@@ -214,11 +170,11 @@
                   </a>
                 </h3>
                 <p class="product-card__summary" coil:text="${related.summary}">
-                  Another product detail route in the same browse loop.
+                  Another piece in the same collection.
                 </p>
                 <div class="product-card__meta">
                   <span class="product-card__price" coil:text="${related.price}">GBP 29</span>
-                  <a class="button" href="/shop/products/harbor-cap" coil:href="${related.url}" coil:t="product.related.view">View look</a>
+                  <a class="button" href="/shop/products/harbor-cap" coil:href="${related.url}" coil:t="product.related.view">View details</a>
                   <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
                     <input
                       type="hidden"
@@ -227,7 +183,7 @@
                       coil:attr="value=${related.slug}"
                     />
                     <input type="hidden" name="quantity" value="1" />
-                    <button class="button button--secondary" type="submit" coil:t="product.related.add_to_cart">Add to cart</button>
+                    <button class="button button--secondary" type="submit" coil:t="product.related.add_to_cart">Add to bag</button>
                   </form>
                 </div>
               </div>
@@ -236,18 +192,6 @@
         </ul>
       </section>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Product page</p>
-        <strong>Shoppr</strong>
-        <p coil:text="${site.settings.footer_body}">This page shows the intended interaction model for product storytelling without abandoning server-rendered foundations.</p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow">Inspect</p>
-        <a href="/cart">Cart</a>
-        <a href="/account">Account</a>
-        <a href="/admin">Admin</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

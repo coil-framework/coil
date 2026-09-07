@@ -85,5 +85,5 @@ product, linked Rust is usually the better fit.
 
 ## Read Next
 
-- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm.md)
-- [Linked Rust Backend](./linked-rust-backend.md)
+- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm/)
+- [Linked Rust Backend](./linked-rust-backend/)

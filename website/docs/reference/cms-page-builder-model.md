@@ -22,7 +22,7 @@ Coil separates:
 Those are three different layers.
 
 If you need the conceptual version first, read
-[Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md).
+[Content schema vs content instances](../core-concepts/content-schema-vs-content-instances/).
 
 ## Layer 1: Content Schema
 
@@ -198,7 +198,7 @@ That stored block is still not the final UI.
 The runtime must resolve the live product list and shape the request-time model.
 
 For that pattern, read
-[Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections.md).
+[Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections/).
 
 ## What Coil Does Not Do Automatically
 
@@ -213,7 +213,7 @@ Coil does **not** automatically:
 You still need explicit request-time shaping.
 
 For that pipeline, read
-[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md).
+[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition/).
 
 ## Safe Mental Model
 
@@ -227,9 +227,9 @@ If you keep those layers separate, the CMS boundary stays understandable.
 
 ## See Also
 
-- [app.toml](./app-toml.md)
-- [Template models](./template-models.md)
-- [Render model hooks](./render-model-hooks.md)
-- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model.md)
-- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks.md)
-- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)
+- [app.toml](./app-toml/)
+- [Template models](./template-models/)
+- [Render model hooks](./render-model-hooks/)
+- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model/)
+- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks/)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks/)

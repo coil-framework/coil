@@ -166,5 +166,5 @@ That keeps customer policy flexible without turning every official module into a
 
 ## Read Next
 
-- [Auth Packages](./auth-packages.md)
-- [Auth Schema](./auth-schema.md)
+- [Auth Packages](./auth-packages/)
+- [Auth Schema](./auth-schema/)

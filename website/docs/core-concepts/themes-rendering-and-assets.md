@@ -195,7 +195,7 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Theme Structure](../reference/theme-structure.md)
-- [Theme Asset Delivery](../reference/theme-asset-delivery.md)
-- [Template Models](../reference/template-models.md)
-- [Accessibility As A Platform Contract](./accessibility-as-a-platform-contract.md)
+- [Theme Structure](../reference/theme-structure/)
+- [Theme Asset Delivery](../reference/theme-asset-delivery/)
+- [Template Models](../reference/template-models/)
+- [Accessibility As A Platform Contract](./accessibility-as-a-platform-contract/)

@@ -8,7 +8,9 @@ pub(super) fn install_module_migration_plan(module: &EventsModule) -> Option<Mig
         .expect("event migration ids are unique");
     plan.insert(event_slots_step(owner.clone()))
         .expect("event migration ids are unique");
-    plan.insert(event_bookings_step(owner))
+    plan.insert(event_bookings_step(owner.clone()))
+        .expect("event migration ids are unique");
+    plan.insert(event_publications_step(owner))
         .expect("event migration ids are unique");
 
     Some(plan)
@@ -52,6 +54,40 @@ fn event_bookings_step(owner: MigrationOwner) -> MigrationStep {
     .expect("constant migration step is valid")
     .with_statement(
         "CREATE TABLE IF NOT EXISTS event_bookings (id TEXT PRIMARY KEY, slot_id TEXT NOT NULL, status TEXT NOT NULL, checked_in_at BIGINT)",
+    )
+    .expect("constant migration statement is valid")
+}
+
+fn event_publications_step(owner: MigrationOwner) -> MigrationStep {
+    MigrationStep::new(
+        MigrationId::new("event_publications").expect("constant migration id is valid"),
+        owner,
+        40,
+        "Create site-scoped event publication and booking ownership storage",
+    )
+    .expect("constant migration step is valid")
+    .with_statement(
+        "CREATE TABLE IF NOT EXISTS event_publications (event_id TEXT NOT NULL REFERENCES events_catalog(id), site_id TEXT NOT NULL, locale TEXT NOT NULL, summary TEXT NOT NULL, is_published BOOLEAN NOT NULL DEFAULT FALSE, updated_at BIGINT NOT NULL, PRIMARY KEY (event_id, site_id, locale))",
+    )
+    .expect("constant migration statement is valid")
+    .with_statement(
+        "CREATE INDEX IF NOT EXISTS event_publications_lookup ON event_publications (site_id, locale, is_published, event_id)",
+    )
+    .expect("constant migration statement is valid")
+    .with_statement(
+        "ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS site_id TEXT",
+    )
+    .expect("constant migration statement is valid")
+    .with_statement(
+        "ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS session_id TEXT",
+    )
+    .expect("constant migration statement is valid")
+    .with_statement(
+        "ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS principal_id TEXT",
+    )
+    .expect("constant migration statement is valid")
+    .with_statement(
+        "ALTER TABLE event_bookings ADD COLUMN IF NOT EXISTS created_at BIGINT",
     )
     .expect("constant migration statement is valid")
 }

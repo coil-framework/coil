@@ -132,6 +132,6 @@ Production CDN behaviour still needs deliberate validation and rollback planning
 
 ## What To Read Next
 
-- [Build and deploy](build-and-deploy.md)
-- [Configuration and secrets](configuration-and-secrets.md)
-- [Cache, TLS, cutover, and rollback](cache-tls-cutover-and-rollback.md)
+- [Build and deploy](../build-and-deploy/)
+- [Configuration and secrets](../configuration-and-secrets/)
+- [Cache, TLS, cutover, and rollback](../cache-tls-cutover-and-rollback/)

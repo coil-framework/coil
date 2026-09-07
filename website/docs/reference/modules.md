@@ -61,14 +61,14 @@ product surface through `apps/shoppr/app.toml` and `apps/shoppr/platform.dev.tom
 
 ## Module Guides
 
-- [CMS](./modules/cms.md)
-- [Media](./modules/media.md)
-- [Commerce](./modules/commerce.md)
-- [Commerce Payments Stripe](./modules/commerce-payments-stripe.md)
-- [Memberships](./modules/memberships.md)
-- [Events](./modules/events.md)
-- [Admin](./modules/admin.md)
-- [Ops](./modules/ops.md)
+- [CMS](./modules/cms/)
+- [Media](./modules/media/)
+- [Commerce](./modules/commerce/)
+- [Commerce Payments Stripe](./modules/commerce-payments-stripe/)
+- [Memberships](./modules/memberships/)
+- [Events](./modules/events/)
+- [Admin](./modules/admin/)
+- [Ops](./modules/ops/)
 
 ## Choosing Between A Module And Customer Code
 
@@ -101,7 +101,7 @@ Shoppr and Gitly are good examples of that split:
 
 ## Read Next
 
-- [Composition And `coil`](./composition.md)
-- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm.md)
-- [Shoppr Overview](../use-cases/shoppr/overview.md)
-- [Gitly Overview](../use-cases/gitly/overview.md)
+- [Composition And `coil`](./composition/)
+- [Customer Rust Vs Third-Party WASM](./customer-vs-wasm/)
+- [Shoppr Overview](../use-cases/shoppr/overview/)
+- [Gitly Overview](../use-cases/gitly/overview/)

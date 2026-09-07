@@ -8,101 +8,63 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title coil:text="${page.title}">Collection</title>
+    <title coil:text="${page.title}">Collection | Shoppr Townhouse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Prata&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&amp;family=Prata&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
-  <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p>Collection pages are campaign landings, not generic archive lists.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev">Dev Tools</a>
-          <a href="/admin">Admin</a>
-          <a href="/account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+  <body class="shoppr-shell shoppr-shell--elevated">
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main collections-page">
       <section class="collections-page__intro" coil:if="${has_collection}">
-        <p class="collections-page__eyebrow">Campaign edit</p>
-        <p>
-          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
-          <span>/</span>
-          <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+        <p class="collections-page__eyebrow" coil:t="collections.grid_eyebrow">The Edit</p>
+        <p class="breadcrumbs">
+          <a href="/shop" coil:attr="href=${links.catalog}" coil:t="product.copy.shop">Shop</a>
+          <span class="separator">/</span>
+          <a href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.copy.collections">
             Collections
           </a>
         </p>
         <h1 coil:text="${collection.title}">Featured</h1>
         <p coil:text="${collection.summary}">
-          A tighter edit that moves the customer from campaign context into product detail and cart
-          without bouncing through unrelated categories.
+          A curated selection from our seasonal campaign.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+          <a class="button button--secondary" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="collections.open_edit">
             All edits
           </a>
-          <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
-            Review cart
+          <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}" coil:t="product.copy.review_cart">
+            Review bag
           </a>
         </div>
       </section>
 
       <section class="catalog-assurance" coil:if="${has_collection}">
         <article>
-          <h2>Browse the products in this edit.</h2>
-          <p>
-            The next click from this page should be product detail. Open a product when the
-            customer needs to confirm price, quantity, or collection context before adding to cart.
+          <h2 coil:t="collections.grid_title">Explore the collection.</h2>
+          <p coil:t="collections.grid_intro">
+            Discover our latest arrivals, carefully selected to build a versatile urban wardrobe.
           </p>
         </article>
       </section>
 
       <section class="catalog-assurance" coil:unless="${has_collection}">
         <article>
-          <h1>This collection is not currently available.</h1>
-          <p>
+          <h1 coil:t="product.unavailable.title">This collection is not currently available.</h1>
+          <p coil:t="product.unavailable.summary">
             Shoppr has removed this collection from the live storefront. Return to the
             collections index or the full catalog to continue shopping.
           </p>
           <div class="checkout-actions">
-            <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+            <a class="button" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.unavailable.collections">
               All collections
             </a>
-            <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
+            <a class="button button--secondary" href="/shop" coil:attr="href=${links.catalog}" coil:t="product.unavailable.catalog">
               Full catalog
             </a>
           </div>
@@ -129,12 +91,12 @@
                   </a>
                 </h2>
                 <p class="product-card__summary" coil:text="${product.summary}">
-                  A product detail route with price, quantity, and the cart handoff on one screen.
+                  A premium essential for the urban wardrobe.
                 </p>
                 <div class="product-card__meta">
                   <span class="product-card__price" coil:text="${product.price}">GBP 29</span>
-                  <a class="button" href="/shop/products/harbor-cap" coil:href="${product.url}">
-                    View look
+                  <a class="button" href="/shop/products/harbor-cap" coil:href="${product.url}" coil:t="product.related.view">
+                    View details
                   </a>
                   <form class="commerce-form commerce-form--inline" action="/cart/items" method="post">
                     <input
@@ -144,7 +106,7 @@
                       coil:attr="value=${product.slug}"
                     />
                     <input type="hidden" name="quantity" value="1" />
-                    <button class="button button--secondary" type="submit">Add to cart</button>
+                    <button class="button button--secondary" type="submit" coil:t="product.related.add_to_cart">Add to bag</button>
                   </form>
                 </div>
               </div>
@@ -154,16 +116,16 @@
         <div class="product-grid__fallback" coil:unless="${has_product_cards}">
           <article class="product-card">
             <div class="product-card__body">
-              <h2>No products are available in this collection yet.</h2>
-              <p>
+              <h2 coil:t="product.unavailable.title">No products are available in this collection yet.</h2>
+              <p coil:t="product.unavailable.summary">
                 Return to the collection index or the full catalog until this collection has live
                 products again.
               </p>
               <div class="checkout-actions">
-                <a class="button" href="/en-GB/shop/collections" coil:attr="href=${links.collections}">
+                <a class="button" href="/shop/collections" coil:attr="href=${links.collections}" coil:t="product.unavailable.collections">
                   All collections
                 </a>
-                <a class="button button--secondary" href="/en-GB/shop" coil:attr="href=${links.catalog}">
+                <a class="button button--secondary" href="/shop" coil:attr="href=${links.catalog}" coil:t="product.unavailable.catalog">
                   Full catalog
                 </a>
               </div>
@@ -171,20 +133,7 @@
           </article>
         </div>
       </section>
-
-      <div coil:replace="~{commerce/storefront-journey :: journey}" coil:if="${has_collection}"></div>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Collection shell</p>
-        <strong>Shoppr</strong>
-        <p coil:text="${site.settings.footer_body}">Every collection page keeps the same navigation, footer, and developer affordances as the rest of the storefront.</p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow">Inspect</p>
-        <a href="/admin">Admin</a>
-        <a href="/__dev">Dev Tools</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

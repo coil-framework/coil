@@ -168,6 +168,6 @@ The switch itself is not the end of the release. Clean post-switch verification 
 
 ## What To Read Next
 
-- [Asset publication and CDN delivery](asset-publication-and-cdn-delivery.md)
-- [Health, readiness, and maintenance mode](health-readiness-and-maintenance-mode.md)
-- [Troubleshooting](troubleshooting.md)
+- [Asset publication and CDN delivery](../asset-publication-and-cdn-delivery/)
+- [Health, readiness, and maintenance mode](../health-readiness-and-maintenance-mode/)
+- [Troubleshooting](../troubleshooting/)

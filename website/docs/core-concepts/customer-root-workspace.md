@@ -226,7 +226,7 @@ In Coil, the workspace root is a product boundary. It is where the applicationâ€
 
 ## Read Next
 
-- [Customer project layout](../getting-started/customer-project-layout.md)
-- [Runtime and module composition](runtime-and-module-composition.md)
-- [Customer apps vs official modules](customer-apps-vs-official-modules.md)
-- [app.toml](../reference/app-toml.md)
+- [Customer project layout](../getting-started/customer-project-layout/)
+- [Runtime and module composition](../runtime-and-module-composition/)
+- [Customer apps vs official modules](../customer-apps-vs-official-modules/)
+- [app.toml](../reference/app-toml/)

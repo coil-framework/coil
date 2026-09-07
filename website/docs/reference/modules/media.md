@@ -132,5 +132,5 @@ Shoppr uses media as part of the broader store workflow:
 
 ## Read Next
 
-- [CMS](./cms.md)
-- [Commerce](./commerce.md)
+- [CMS](./cms/)
+- [Commerce](./commerce/)

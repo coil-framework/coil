@@ -185,6 +185,6 @@ If you want the full Shoppr implementation after reading the pattern:
 
 ## Read Next
 
-- [Linked Rust Backend](./linked-rust-backend.md)
-- [Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work.md)
-- [Commerce Module Reference](../../reference/modules/commerce.md)
+- [Linked Rust Backend](./linked-rust-backend/)
+- [Jobs, Webhooks, And Background Work](./jobs-webhooks-and-background-work/)
+- [Commerce Module Reference](../../reference/modules/commerce/)

@@ -124,6 +124,6 @@ If you want the complete Shoppr implementation after learning the pattern:
 
 ## Read Next
 
-- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm.md)
-- [Shoppr WASM Extensions](./wasm-extensions.md)
-- [Shoppr Checkout And Operations](./checkout-and-operations.md)
+- [Customer Rust Vs Third-Party WASM](../../reference/customer-vs-wasm/)
+- [Shoppr WASM Extensions](./wasm-extensions/)
+- [Shoppr Checkout And Operations](./checkout-and-operations/)

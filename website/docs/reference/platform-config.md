@@ -651,7 +651,7 @@ These are not abstract nice-to-haves. They are the runtime switches that determi
 
 Read next:
 
-- [Observability, monitoring, and audit](../operations/observability.md)
+- [Observability, monitoring, and audit](../operations/observability/)
 
 ## `[assets]`
 
@@ -711,7 +711,7 @@ Broadly yes, but with development-safe differences:
 
 ## Read Next
 
-- [app.toml](app-toml.md)
-- [Build and deploy](../operations/build-and-deploy.md)
-- [Configuration and secrets](../operations/configuration-and-secrets.md)
-- [Cache, TLS, cutover, and rollback](../operations/cache-tls-cutover-and-rollback.md)
+- [app.toml](../app-toml/)
+- [Build and deploy](../operations/build-and-deploy/)
+- [Configuration and secrets](../operations/configuration-and-secrets/)
+- [Cache, TLS, cutover, and rollback](../operations/cache-tls-cutover-and-rollback/)

@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["server"]
+server = ["coil/fission-server", "coil/fission-site", "shoppr-fission/site"]
+
 [dependencies]
 anyhow.workspace = true
 coil.workspace = true
@@ -17,11 +21,14 @@ coil-runtime.workspace = true
 coil-wasm = "0.1.0"
 hex = "0.4"
 shoppr-backend = { path = "../shoppr-backend" }
+shoppr-fission.workspace = true
 serde.workspace = true
 sha2 = "0.10"
+sqlx.workspace = true
 tokio.workspace = true
 toml = "0.8"
 wat = "1"
 
 [dev-dependencies]
 axum = "0.8"
+serde_json.workspace = true

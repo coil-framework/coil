@@ -164,6 +164,6 @@ Use those after reading this page, not instead of reading this page.
 
 ## Read Next
 
-- [Theming, Localisation, And Accessibility](./theming-localization-and-accessibility.md)
-- [API And Background Work](./api-and-background-work.md)
-- [Gitly Overview](./overview.md)
+- [Theming, Localisation, And Accessibility](./theming-localization-and-accessibility/)
+- [API And Background Work](./api-and-background-work/)
+- [Gitly Overview](./overview/)

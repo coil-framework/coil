@@ -205,7 +205,7 @@ cargo run -p tutorial-app-bin -- serve
 
 ## What To Read Next
 
-- [Customer project layout](customer-project-layout.md)
-- [Customer-root workspace](../core-concepts/customer-root-workspace.md)
-- [Render model hooks](../reference/render-model-hooks.md)
-- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm.md)
+- [Customer project layout](../customer-project-layout/)
+- [Customer-root workspace](../core-concepts/customer-root-workspace/)
+- [Render model hooks](../reference/render-model-hooks/)
+- [Customer Rust vs third-party WASM](../reference/customer-vs-wasm/)

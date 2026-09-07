@@ -120,5 +120,5 @@ Shoppr uses memberships in:
 
 ## Read Next
 
-- [Commerce](./commerce.md)
-- [Events](./events.md)
+- [Commerce](./commerce/)
+- [Events](./events/)

@@ -12,25 +12,22 @@
     <link rel="stylesheet" href="/theme/assets/site.css" coil:href="asset('theme/assets/site.css')" />
   </head>
   <body class="harbor">
-    <header class="site-header">
-      <a href="/" class="brand" coil:attr="href=${links.home}">Shoppr</a>
-      <nav coil:replace="~{navigation/primary}"></nav>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main class="site-main collections-page">
       <section class="collections-page__intro">
-        <p class="collections-page__eyebrow">Collections</p>
+        <p class="collections-page__eyebrow" coil:t="collections_page.eyebrow">Collections</p>
         <p>
-          <a href="/en-GB/shop" coil:attr="href=${links.catalog}">Shop</a>
+          <a href="/shop" coil:attr="href=${links.catalog}" coil:t="product.copy.shop">Shop</a>
           <span>/</span>
-          <span>Collections</span>
+          <span coil:t="collections_page.eyebrow">Collections</span>
         </p>
-        <h1>Choose the collection before you choose the product.</h1>
+        <h1 coil:t="collections_page.title">Choose the collection before you choose the product.</h1>
         <p>
           This page should send customers into a tighter merchandising edit first, then on to
           product detail and cart.
         </p>
         <div class="checkout-actions">
-          <a class="button" href="/en-GB/shop" coil:attr="href=${links.catalog}">Browse full catalog</a>
+          <a class="button" href="/shop" coil:attr="href=${links.catalog}" coil:t="collections_page.browse_catalog_button">Browse full catalog</a>
           <a class="button button--secondary" href="/cart" coil:attr="href=${links.cart}">
             Review cart
           </a>
@@ -41,14 +38,14 @@
 
       <section class="catalog-assurance">
         <article>
-          <h2>Use this page as the browse handoff</h2>
+          <h2 coil:t="collections_page.browse_handoff_heading">Use this page as the browse handoff</h2>
           <p>
             The next click from here should be a collection detail page, not a dead-end editorial
             block.
           </p>
         </article>
         <article>
-          <h2>Then move into product detail</h2>
+          <h2 coil:t="collections_page.product_detail_heading">Then move into product detail</h2>
           <p>
             Once the customer is in the right collection, product detail should be the only
             decision surface before cart.
@@ -69,8 +66,6 @@
       <div coil:replace="~{commerce/product-grid :: grid}"></div>
       <div coil:replace="~{commerce/storefront-journey :: journey}"></div>
     </main>
-    <footer class="site-footer">
-      <small>Shoppr</small>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

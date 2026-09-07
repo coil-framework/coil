@@ -161,6 +161,6 @@ commerce vocabulary dominating the example.
 
 ## Read Next
 
-- [Product Structure](./product-structure.md)
-- [API And Background Work](./api-and-background-work.md)
-- [Build And Deploy](./build-and-deploy.md)
+- [Product Structure](./product-structure/)
+- [API And Background Work](./api-and-background-work/)
+- [Build And Deploy](./build-and-deploy/)

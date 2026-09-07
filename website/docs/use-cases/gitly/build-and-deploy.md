@@ -148,6 +148,6 @@ These show:
 
 ## Read Next
 
-- [Extensions And Host APIs](./extensions-and-host-apis.md)
-- [CLI Commands](../../reference/cli-commands.md)
-- [Environment Variables](../../reference/environment-variables.md)
+- [Extensions And Host APIs](./extensions-and-host-apis/)
+- [CLI Commands](../../reference/cli-commands/)
+- [Environment Variables](../../reference/environment-variables/)

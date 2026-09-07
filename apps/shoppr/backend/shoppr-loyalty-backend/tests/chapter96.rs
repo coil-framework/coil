@@ -225,7 +225,7 @@ fn linked_backend_docs_and_bootstrap_stay_primary() {
         "{compose}"
     );
     assert!(
-        compose.contains("SHOPPR_BACKEND_BIND: \"0.0.0.0:8081\""),
+        compose.contains("SHOPPR_BACKEND_BIND: \"0.0.0.0:8091\""),
         "{compose}"
     );
     assert!(

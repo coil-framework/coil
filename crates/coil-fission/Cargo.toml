@@ -1,0 +1,24 @@
+[package]
+name = "coil-fission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository = "https://github.com/coil-framework/coil"
+homepage = "https://coil.rs"
+description = "Fission-native application and web contracts for Coil."
+
+[features]
+default = ["server"]
+server = ["fission/server"]
+site = ["fission/site"]
+web = ["fission/web"]
+
+[dependencies]
+fission = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1.0"
+
+[[test]]
+name = "ssr_jobs"
+required-features = ["server"]

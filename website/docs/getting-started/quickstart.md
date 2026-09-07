@@ -391,31 +391,31 @@ files under `theme/frontend/`.
 
 Read the tutorial in this order:
 
-1. [What You Are Building](what-you-are-building.md)
-2. [Create the Project](create-the-project.md)
-3. [Understand the Runtime Shape](understand-the-runtime-shape.md)
-4. [Build the Base Theme](build-the-base-theme.md)
-5. [Add Sites, Markets, and Locales](add-sites-markets-and-locales.md)
-6. [Add a Real Content Model](add-a-real-content-model.md)
-7. [Build Reusable Blocks](build-reusable-blocks.md)
-8. [Add Dynamic Blocks](add-dynamic-blocks.md)
-9. [Model Brands, Categories, and Discovery](model-brands-categories-and-discovery.md)
-10. [Add Authentication and Customer Accounts](add-authentication-and-customer-accounts.md)
-11. [Add Memberships and Audience Gating](add-memberships-and-audience-gating.md)
-12. [Add Events and Timeslots](add-events-and-timeslots.md)
-13. [Add Bookings, Reservations, and Validation](add-bookings-reservations-and-validation.md)
-14. [Add Passes or Credits](add-passes-or-credits.md)
-15. [Add Admin Resources](add-admin-resources.md)
-16. [Add One Reproducible Integration](add-one-reproducible-integration.md)
-17. [Add Jobs, Notifications, and Scheduled Work](add-jobs-notifications-and-scheduled-work.md)
-18. [Add Observability and Troubleshooting](add-observability-and-troubleshooting.md)
-19. [Prepare for Production](prepare-for-production.md)
-20. [Where to Go Next](where-to-go-next.md)
+1. [What You Are Building](../what-you-are-building/)
+2. [Create the Project](../create-the-project/)
+3. [Understand the Runtime Shape](../understand-the-runtime-shape/)
+4. [Build the Base Theme](../build-the-base-theme/)
+5. [Add Sites, Markets, and Locales](../add-sites-markets-and-locales/)
+6. [Add a Real Content Model](../add-a-real-content-model/)
+7. [Build Reusable Blocks](../build-reusable-blocks/)
+8. [Add Dynamic Blocks](../add-dynamic-blocks/)
+9. [Model Brands, Categories, and Discovery](../model-brands-categories-and-discovery/)
+10. [Add Authentication and Customer Accounts](../add-authentication-and-customer-accounts/)
+11. [Add Memberships and Audience Gating](../add-memberships-and-audience-gating/)
+12. [Add Events and Timeslots](../add-events-and-timeslots/)
+13. [Add Bookings, Reservations, and Validation](../add-bookings-reservations-and-validation/)
+14. [Add Passes or Credits](../add-passes-or-credits/)
+15. [Add Admin Resources](../add-admin-resources/)
+16. [Add One Reproducible Integration](../add-one-reproducible-integration/)
+17. [Add Jobs, Notifications, and Scheduled Work](../add-jobs-notifications-and-scheduled-work/)
+18. [Add Observability and Troubleshooting](../add-observability-and-troubleshooting/)
+19. [Prepare for Production](../prepare-for-production/)
+20. [Where to Go Next](../where-to-go-next/)
 
 Supporting pages:
 
-- [Customer Project Layout](customer-project-layout.md)
-- [Linked Rust Backends](linked-rust-backends.md)
+- [Customer Project Layout](../customer-project-layout/)
+- [Linked Rust Backends](../linked-rust-backends/)
 
 ## Checkpoint
 

@@ -35,4 +35,4 @@ cargo run -p my-store -- validate
 
 ## Read Next
 
-- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
+- [CLI Auth And Module Commands](./cli-auth-and-modules/)

@@ -189,8 +189,8 @@ Coil’s HTML-first model is an advantage. Do not throw it away.
 
 ## What Should I Read Next?
 
-- [Template Language](./template-language.md)
-- [Theme Structure](./theme-structure.md)
-- [Accessibility As A Platform Contract](../core-concepts/accessibility-as-a-platform-contract.md)
+- [Template Language](./template-language/)
+- [Theme Structure](./theme-structure/)
+- [Accessibility As A Platform Contract](../core-concepts/accessibility-as-a-platform-contract/)
 - `apps/gitly/templates/gitly/`
 - `apps/shoppr/templates/commerce/`

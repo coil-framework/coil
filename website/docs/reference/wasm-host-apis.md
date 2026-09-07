@@ -428,8 +428,8 @@ If you want to study a full working implementation after reading this page, star
 
 ## Read Next
 
-- [Extension Package Format](./extension-package-format.md)
-- [Writing And Installing WASM Extensions](./wasm-writing-and-installing-extensions.md)
-- [WASM Host Service Examples](./wasm-host-service-examples.md)
-- [Linked Rust Hook APIs](./linked-rust-hook-apis.md)
-- [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis.md)
+- [Extension Package Format](./extension-package-format/)
+- [Writing And Installing WASM Extensions](./wasm-writing-and-installing-extensions/)
+- [WASM Host Service Examples](./wasm-host-service-examples/)
+- [Linked Rust Hook APIs](./linked-rust-hook-apis/)
+- [Gitly Extensions And Host APIs](../use-cases/gitly/extensions-and-host-apis/)

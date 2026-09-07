@@ -235,8 +235,8 @@ If you are building a Coil store, copy these ideas before copying markup:
 
 ## Read Next
 
-- [Storefront Structure](./storefront-structure.md)
-- [Catalog And Merchandising](./catalog-and-merchandising.md)
-- [Checkout And Operations](./checkout-and-operations.md)
-- [Linked Rust Backend](./linked-rust-backend.md)
-- [WASM Extensions](./wasm-extensions.md)
+- [Storefront Structure](./storefront-structure/)
+- [Catalog And Merchandising](./catalog-and-merchandising/)
+- [Checkout And Operations](./checkout-and-operations/)
+- [Linked Rust Backend](./linked-rust-backend/)
+- [WASM Extensions](./wasm-extensions/)

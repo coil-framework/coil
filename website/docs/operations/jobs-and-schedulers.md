@@ -179,6 +179,6 @@ apps for clarity.
 
 ## Read Next
 
-- [Observability, monitoring, and audit](observability.md)
-- [Troubleshooting](troubleshooting.md)
-- [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work.md)
+- [Observability, monitoring, and audit](../observability/)
+- [Troubleshooting](../troubleshooting/)
+- [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work/)

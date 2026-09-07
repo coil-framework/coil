@@ -189,6 +189,6 @@ If you are building a Coil storefront, copy this structure before you copy Shopp
 
 ## Read Next
 
-- [Catalog And Merchandising](./catalog-and-merchandising.md)
-- [Sites, Locales, And Theme Variants](./sites-locales-and-theme-variants.md)
-- [Template Language Reference](../../reference/template-language.md)
+- [Catalog And Merchandising](./catalog-and-merchandising/)
+- [Sites, Locales, And Theme Variants](./sites-locales-and-theme-variants/)
+- [Template Language Reference](../../reference/template-language/)

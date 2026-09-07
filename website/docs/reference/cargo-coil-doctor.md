@@ -42,4 +42,4 @@ cargo coil apply --root ./my-store
 
 ## Read Next
 
-- [cargo coil apply](./cargo-coil-apply.md)
+- [cargo coil apply](./cargo-coil-apply/)

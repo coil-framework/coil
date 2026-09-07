@@ -133,5 +133,5 @@ The practical sequence is:
 
 ## Read Next
 
-- [Commerce](./commerce.md)
-- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations.md)
+- [Commerce](./commerce/)
+- [Shoppr Checkout And Operations](../../use-cases/shoppr/checkout-and-operations/)

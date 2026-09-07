@@ -23,72 +23,10 @@
     <script src="/theme/assets/site.js" coil:src="asset('theme/assets/site.js')" defer="defer"></script>
   </head>
   <body class="shoppr-shell">
-    <header class="site-header">
-      <div class="site-header__utility">
-        <p coil:t="shell.utility.summary">Shoppr Studio. One brand, three markets, localized routes, interactive storefront.</p>
-        <div class="site-header__utility-links">
-          <a href="/__dev" coil:t="shell.utility.dev_tools">Dev Tools</a>
-          <a href="/admin" coil:t="shell.utility.admin">Admin</a>
-          <a href="/account" coil:t="shell.utility.account">Account</a>
-        </div>
-      </div>
-      <div class="site-header__main">
-        <a href="/" class="brand" coil:attr="href=${links.home}">
-          <span class="brand__mark">S</span>
-          <span class="brand__wordmark" coil:text="${site.brand_name}">Shoppr</span>
-        </a>
-        <nav coil:replace="~{navigation/primary}"></nav>
-      </div>
-      <div class="site-header__panels">
-        <div class="switcher-panel" id="market-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.market">Market</p>
-          <ul>
-            <li coil:each="item : ${links.site_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">Shoppr UK</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-        <div class="switcher-panel" id="locale-panel" hidden="hidden">
-          <p class="switcher-panel__eyebrow" coil:t="nav.language">Language</p>
-          <ul>
-            <li coil:each="item : ${links.locale_switches}">
-              <a href="/" coil:attr="href=${item.href}" coil:text="${item.label}">English</a>
-              <span coil:if="${item.active}" coil:t="nav.current">Current</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </header>
+    <header class="site-header" coil:replace="~{navigation/header}"></header>
     <main coil:slot="content">
       <section>Content goes here.</section>
     </main>
-    <footer class="site-footer">
-      <div>
-        <p class="site-footer__eyebrow" coil:text="${site.settings.footer_heading}">Developer footer</p>
-        <strong>Shoppr</strong>
-        <p coil:text="${site.settings.footer_body}">
-          Retail starter showing multi-site, multi-locale, customer-linked Rust, and third-party WASM.
-        </p>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="shell.footer.inspect">Inspect</p>
-        <a href="/admin" coil:t="shell.utility.admin">Admin</a>
-        <a href="/__dev" coil:t="shell.utility.dev_tools">Dev login</a>
-        <a href="/account" coil:t="shell.utility.account">Account</a>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="shell.footer.commerce">Commerce</p>
-        <a href="/en-GB/shop" coil:attr="href=${links.catalog}" coil:t="shell.footer.catalog">Catalog</a>
-        <a href="/en-GB/shop/collections" coil:attr="href=${links.collections}" coil:t="shell.footer.collections">Collections</a>
-        <a href="/cart" coil:attr="href=${links.cart}" coil:t="shell.footer.cart">Cart</a>
-      </div>
-      <div>
-        <p class="site-footer__eyebrow" coil:t="shell.footer.platform">Platform</p>
-        <a href="/admin/catalog" coil:t="shell.footer.catalog_admin">Catalog admin</a>
-        <a href="/admin/orders" coil:t="shell.footer.orders">Orders</a>
-        <a href="/admin/pages" coil:t="shell.footer.cms">CMS</a>
-      </div>
-    </footer>
+    <footer class="site-footer" coil:replace="~{navigation/footer}"></footer>
   </body>
 </html>

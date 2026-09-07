@@ -69,7 +69,7 @@ This is also why `app.toml` is not a page builder.
 `app.toml` can declare content models and migration ownership, but it does not itself create page
 instances, populate CMS records, or inject live `page.blocks` into the render model.
 
-For the manifest contract, read [app.toml](../reference/app-toml.md).
+For the manifest contract, read [app.toml](../reference/app-toml/).
 
 ## What Coil Does Not Do Automatically
 
@@ -128,7 +128,7 @@ That means content instances only matter once they have been loaded or composed 
 model.
 
 For the canonical request-time flow, read
-[Render pipeline and model composition](./render-pipeline-and-model-composition.md).
+[Render pipeline and model composition](./render-pipeline-and-model-composition/).
 
 ## Dynamic Blocks Make This Even More Important
 
@@ -144,7 +144,7 @@ So even when the editor has chosen a block, the live block output still depends 
 runtime work.
 
 For that model, read
-[Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections.md).
+[Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections/).
 
 ## Common Mistakes
 
@@ -164,9 +164,9 @@ request-time model exposes it.
 
 ## Read Next
 
-- [Render pipeline and model composition](./render-pipeline-and-model-composition.md)
-- [Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections.md)
-- [app.toml](../reference/app-toml.md)
-- [CMS page builder model](../reference/cms-page-builder-model.md)
-- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model.md)
-- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks.md)
+- [Render pipeline and model composition](./render-pipeline-and-model-composition/)
+- [Dynamic blocks and live-data sections](./dynamic-blocks-and-live-data-sections/)
+- [app.toml](../reference/app-toml/)
+- [CMS page builder model](../reference/cms-page-builder-model/)
+- [Getting Started: Add a Real Content Model](../getting-started/add-a-real-content-model/)
+- [Getting Started: Build Reusable Blocks](../getting-started/build-reusable-blocks/)

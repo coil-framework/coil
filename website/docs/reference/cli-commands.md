@@ -63,14 +63,14 @@ cargo install cargo-coil --locked
 
 Detailed command pages:
 
-- [Cargo Coil Overview](./cargo-coil-overview.md)
-- [cargo coil new](./cargo-coil-new.md)
-- [cargo coil init](./cargo-coil-init.md)
-- [cargo coil apply](./cargo-coil-apply.md)
-- [cargo coil doctor](./cargo-coil-doctor.md)
-- [cargo coil module add and remove](./cargo-coil-module.md)
-- [cargo coil site add](./cargo-coil-site.md)
-- [cargo coil locale add](./cargo-coil-locale.md)
+- [Cargo Coil Overview](./cargo-coil-overview/)
+- [cargo coil new](./cargo-coil-new/)
+- [cargo coil init](./cargo-coil-init/)
+- [cargo coil apply](./cargo-coil-apply/)
+- [cargo coil doctor](./cargo-coil-doctor/)
+- [cargo coil module add and remove](./cargo-coil-module/)
+- [cargo coil site add](./cargo-coil-site/)
+- [cargo coil locale add](./cargo-coil-locale/)
 
 ## The Relationship Between The CLI Surfaces
 
@@ -166,7 +166,7 @@ These are grounded in the live auth package and runtime state, not just static f
 
 Each auth subcommand now has its own detailed page:
 
-- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
+- [CLI Auth And Module Commands](./cli-auth-and-modules/)
 
 ## Module Commands
 
@@ -203,7 +203,7 @@ contracts.
 
 Detailed command usage lives here:
 
-- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import/)
 
 ## Cache Commands
 
@@ -236,7 +236,7 @@ library feature.
 
 Detailed usage lives here:
 
-- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets.md)
+- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets/)
 
 ## TLS, Storage, Assets, And Import
 
@@ -342,11 +342,11 @@ Use the customer binary when you need:
 
 ## Read Next
 
-- [Customer Workspace Binaries](./customer-workspace-binaries.md)
-- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
-- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
-- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets.md)
-- [Environment Variables](./environment-variables.md)
-- [Migration Files And Ownership](./migration-files-and-ownership.md)
-- [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work.md)
-- [Gitly Build And Deploy](../use-cases/gitly/build-and-deploy.md)
+- [Customer Workspace Binaries](./customer-workspace-binaries/)
+- [CLI Auth And Module Commands](./cli-auth-and-modules/)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import/)
+- [CLI Cache, Jobs, TLS, Storage, And Assets](./cli-cache-jobs-storage-and-assets/)
+- [Environment Variables](./environment-variables/)
+- [Migration Files And Ownership](./migration-files-and-ownership/)
+- [Shoppr Jobs, Webhooks, And Background Work](../use-cases/shoppr/jobs-webhooks-and-background-work/)
+- [Gitly Build And Deploy](../use-cases/gitly/build-and-deploy/)

@@ -103,6 +103,6 @@ Use the platform CLI when you want:
 
 ## Read Next
 
-- [CLI Commands](./cli-commands.md)
-- [CLI Auth And Module Commands](./cli-auth-and-modules.md)
-- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import.md)
+- [CLI Commands](./cli-commands/)
+- [CLI Auth And Module Commands](./cli-auth-and-modules/)
+- [CLI Migrations, Release, And Import](./cli-migrations-release-and-import/)

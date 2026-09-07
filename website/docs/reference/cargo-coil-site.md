@@ -34,5 +34,5 @@ translation work.
 
 ## Read Next
 
-- [Sites, Locales, And Markets](../core-concepts/sites-locales-and-markets.md)
-- [cargo coil locale add](./cargo-coil-locale.md)
+- [Sites, Locales, And Markets](../core-concepts/sites-locales-and-markets/)
+- [cargo coil locale add](./cargo-coil-locale/)

@@ -300,5 +300,5 @@ The canonical checked-in example is:
 
 ## Read Next
 
-- [Auth Packages](./auth-packages.md)
-- [Auth Schema](./auth-schema.md)
+- [Auth Packages](./auth-packages/)
+- [Auth Schema](./auth-schema/)

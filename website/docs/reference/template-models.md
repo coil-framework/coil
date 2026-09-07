@@ -5,7 +5,7 @@ title: Template Models
 Coil templates render against a typed `RenderModel`, not an unstructured JSON blob.
 
 If you are trying to understand where that model comes from, read
-[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
+[Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition/)
 alongside this page.
 
 ## How A Route Actually Reaches A Template
@@ -152,7 +152,7 @@ custom template?" is now explicit:
 3. your linked Rust render-model hook contributes additional model data
 4. the template consumes the combined model
 
-Read the full contract in [Render Model Hooks](./render-model-hooks.md).
+Read the full contract in [Render Model Hooks](./render-model-hooks/).
 
 ## Start With A Model And Its Template
 
@@ -454,7 +454,7 @@ Customer code should generally mount its own namespaces for customer-owned reque
 - `customer_extension`
 
 Merge into framework-owned objects only when the field genuinely belongs to a shared public
-contract. For that rule, read [Render model hooks](./render-model-hooks.md).
+contract. For that rule, read [Render model hooks](./render-model-hooks/).
 
 ## Dynamic Blocks And Live Sections
 
@@ -470,8 +470,8 @@ Coil does not automatically turn:
 into a fully resolved live block payload.
 
 For that boundary, read
-[Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections.md)
-and [CMS page builder model](./cms-page-builder-model.md).
+[Dynamic blocks and live-data sections](../core-concepts/dynamic-blocks-and-live-data-sections/)
+and [CMS page builder model](./cms-page-builder-model/).
 
 ## What The Demos Prove Today
 
@@ -535,10 +535,10 @@ Full implementation:
 
 ## What Should I Read Next?
 
-- [Template Language](./template-language.md)
-- [Theme Asset Delivery](./theme-asset-delivery.md)
-- [Internationalisation](./internationalization.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
-- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances.md)
-- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition.md)
-- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks.md)
+- [Template Language](./template-language/)
+- [Theme Asset Delivery](./theme-asset-delivery/)
+- [Internationalisation](./internationalization/)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets/)
+- [Content schema vs content instances](../core-concepts/content-schema-vs-content-instances/)
+- [Render pipeline and model composition](../core-concepts/render-pipeline-and-model-composition/)
+- [Getting Started: Add Dynamic Blocks](../getting-started/add-dynamic-blocks/)

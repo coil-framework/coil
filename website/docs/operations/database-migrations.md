@@ -105,6 +105,6 @@ Not every schema change is naturally reversible. Know the rollback posture befor
 
 ## What To Read Next
 
-- [Build and deploy](build-and-deploy.md)
-- [Troubleshooting](troubleshooting.md)
-- [Cache, TLS, cutover, and rollback](cache-tls-cutover-and-rollback.md)
+- [Build and deploy](../build-and-deploy/)
+- [Troubleshooting](../troubleshooting/)
+- [Cache, TLS, cutover, and rollback](../cache-tls-cutover-and-rollback/)

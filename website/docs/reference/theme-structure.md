@@ -232,7 +232,7 @@ Concrete supporting files:
 
 ## What Should I Read Next?
 
-- [Theme Asset Delivery](./theme-asset-delivery.md)
-- [Template Language](./template-language.md)
-- [Template Models](./template-models.md)
-- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets.md)
+- [Theme Asset Delivery](./theme-asset-delivery/)
+- [Template Language](./template-language/)
+- [Template Models](./template-models/)
+- [Themes, Rendering, And Assets](../core-concepts/themes-rendering-and-assets/)

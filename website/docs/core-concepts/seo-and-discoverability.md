@@ -174,7 +174,7 @@ The current runtime model is designed to inject it from typed metadata and confi
 
 ## What Should I Read Next?
 
-- [SEO](../reference/seo.md)
-- [Internationalisation](../reference/internationalization.md)
-- [Themes, Rendering, And Assets](./themes-rendering-and-assets.md)
+- [SEO](../reference/seo/)
+- [Internationalisation](../reference/internationalization/)
+- [Themes, Rendering, And Assets](./themes-rendering-and-assets/)
 - `crates/coil-runtime/src/render/seo.rs`

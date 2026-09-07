@@ -162,7 +162,7 @@ license.
 
 ## Read Next
 
-- [Official Modules](../reference/modules.md)
-- [Composition And `coil`](../reference/composition.md)
-- [Shoppr Overview](../use-cases/shoppr/overview.md)
-- [Gitly Overview](../use-cases/gitly/overview.md)
+- [Official Modules](../reference/modules/)
+- [Composition And `coil`](../reference/composition/)
+- [Shoppr Overview](../use-cases/shoppr/overview/)
+- [Gitly Overview](../use-cases/gitly/overview/)

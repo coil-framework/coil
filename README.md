@@ -67,7 +67,7 @@ Then open:
 ### 2. Read The Public Docs
 
 ```bash
-cargo run -p coil-website -- serve --project-dir website --no-open
+fission site serve --project-dir website --no-open
 ```
 
 That gives you:

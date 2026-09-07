@@ -47,5 +47,9 @@ jobs:
           git -C "$RUNNER_WORKSPACE/../fission/fission" checkout "$FISSION_REV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build docs
-        run: cargo run -p coil-website -- build --project-dir website
+      - name: Install the pinned Fission CLI
+        run: cargo install --locked --path "$RUNNER_WORKSPACE/../fission/fission/crates/tools/cargo-fission" --root "$RUNNER_TEMP/fission-cli"
+      - name: Serve and check docs
+        env:
+          FISSION_BIN: ${{ runner.temp }}/fission-cli/bin/fission
+        run: ./scripts/check-website-serve.sh

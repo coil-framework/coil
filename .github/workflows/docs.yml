@@ -42,8 +42,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/configure-pages@v5
-      - name: Build site
-        run: cargo run -p coil-website -- build --project-dir website
+      - name: Install the pinned Fission CLI
+        run: cargo install --locked --path "$RUNNER_WORKSPACE/../fission/fission/crates/tools/cargo-fission" --root "$RUNNER_TEMP/fission-cli"
+      - name: Serve and check site
+        env:
+          FISSION_BIN: ${{ runner.temp }}/fission-cli/bin/fission
+        run: ./scripts/check-website-serve.sh
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website/dist

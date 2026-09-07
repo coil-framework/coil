@@ -94,7 +94,7 @@ Coil is intentionally split into clear layers:
 - Fission: rendering, retained widgets, routing, synchronous reducers, awaited jobs, SSR, islands, and Web shells.
 - Coil core: sites, markets, product domains, auth policy, storage, cache policy, jobs, observability, and operations.
 - Official modules: CMS, commerce, memberships, events, admin, media, ops, and other reusable batteries.
-- Customer apps: branding, templates, configuration, auth mappings, Rust business logic, and optional WASM extensions.
+- Customer apps: branding, Fission page composition, configuration, auth mappings, Rust business logic, and optional WASM extensions.
 
 The demos are not toy frontends taped onto a crate. They are meant to be believable starting points for real customer work.
 

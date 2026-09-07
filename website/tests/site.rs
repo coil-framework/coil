@@ -9,6 +9,21 @@ impl Drop for RemoveOnDrop {
 }
 
 #[test]
+fn fission_cli_uses_the_custom_site_entrypoint() {
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fission.toml"),
+    )
+    .unwrap();
+
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line.trim() == r#"entry = "coil_website::site""#),
+        "fission site commands bypass the custom home route without site.entry"
+    );
+}
+
+#[test]
 fn fission_site_owns_the_home_docs_and_architecture_routes() {
     let project_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nonce = std::time::SystemTime::now()

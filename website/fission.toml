@@ -4,6 +4,7 @@ targets = ["static-site"]
 name = "Coil"
 
 [site]
+entry = "coil_website::site"
 title = "Coil"
 description = "A Fission-native Rust product framework for public, interactive, and operational web surfaces."
 base_url = "https://coil.rs"

@@ -3,6 +3,7 @@ use coil::fission::server::{
     FissionServerApp, ServerHttpContext, ServerRenderContext, ServerResponse, WasmIsland,
     WebRouteMode,
 };
+use coil::fission::theme::{DesignMode, Theme};
 use coil::{public_revalidation, SiteDefinition, SiteRegistry};
 use coil_config::{Environment, PlatformConfig};
 use gitly_fission::{GitlyPage, GitlyPageView, GitlyState};
@@ -57,6 +58,7 @@ pub fn gitly_server_app(
         .project_dir(&project_dir)
         .user_css(gitly_fission::GITLY_CSS)
         .static_dir("/theme", project_dir.join("theme"))
+        .light_dark_themes(Theme::default(), Theme::dark(), DesignMode::Light)
         .default_locale("en-GB")
         .locale_resolver(|ctx| {
             Ok(match ctx.route_path {

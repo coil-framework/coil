@@ -71,6 +71,7 @@ fn desktop_header(state: &GitlyState, env: &Env) -> Widget {
                         local_path(locale, "/alexmariner"),
                     )
                     .into(),
+                    theme_toggle(env),
                 ],
                 ..Default::default()
             }
@@ -122,6 +123,7 @@ fn mobile_header(state: &GitlyState, env: &Env) -> Widget {
             }
             .into(),
             language_switcher(state.page, env),
+            theme_toggle(env),
             Divider::default().into(),
         ],
         ..Default::default()
@@ -143,6 +145,15 @@ fn language_switcher(page: GitlyPage, env: &Env) -> Widget {
         ..Default::default()
     }
     .into()
+}
+
+fn theme_toggle(env: &Env) -> Widget {
+    let label = t(env, "nav.theme", "Switch colour theme");
+    SemanticsRegion::new(Text::new(label.clone()))
+        .identifier("site-theme-toggle")
+        .label(label)
+        .role(Role::Button)
+        .into()
 }
 
 fn content(state: &GitlyState, env: &Env) -> Widget {

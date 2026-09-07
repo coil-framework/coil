@@ -592,6 +592,14 @@ fn fission_server_preserves_gitly_pages_locales_apis_and_search_island() {
         repository_body.contains("<title>forgeflow/platform-ui | Gitly</title>"),
         "{repository_body}"
     );
+    assert!(
+        repository_body.contains("data-fission-theme-toggle"),
+        "{repository_body}"
+    );
+    assert!(
+        repository_body.contains("fission-site-theme"),
+        "{repository_body}"
+    );
 
     let mut search = ServerRequest::get("/de/search");
     search.query.insert("q".into(), "platform".into());

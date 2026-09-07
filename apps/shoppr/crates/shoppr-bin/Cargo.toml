@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-coil.workspace = true
+coil = { workspace = true, features = ["fission-server", "fission-site"] }
 shoppr-app = { path = "../shoppr-app" }
 shoppr-backend = { path = "../shoppr-backend" }
 serde.workspace = true

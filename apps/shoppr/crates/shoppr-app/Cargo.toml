@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["server"]
+server = ["coil/fission-server", "coil/fission-site", "shoppr-fission/site"]
+
 [dependencies]
 anyhow.workspace = true
 coil.workspace = true

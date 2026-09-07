@@ -16,9 +16,11 @@ coil-customer-sdk.workspace = true
 coil-data.workspace = true
 coil-runtime.workspace = true
 coil-wasm.workspace = true
+gitly-fission = { workspace = true, features = ["site"] }
 hex = "0.4"
 gitly-backend = { path = "../gitly-backend" }
 serde.workspace = true
+serde_json.workspace = true
 sha2 = "0.10"
 tokio.workspace = true
 toml = "0.8"

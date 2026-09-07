@@ -1,15 +1,17 @@
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::http::Request;
 use coil_runtime::EnvironmentSecretResolver;
 use gitly_app::{
-    GitlyWorkspace, gitly_actions_scheduler_demo_sha256, gitly_community_pulse_demo_sha256,
+    fission_app::{gitly_server_app, GitlyServerModel},
+    gitly_actions_scheduler_demo_sha256, gitly_community_pulse_demo_sha256, GitlyWorkspace,
 };
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    LazyLock, Mutex,
     atomic::{AtomicU64, Ordering},
+    LazyLock, Mutex,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -124,6 +126,21 @@ fn temp_workspace_without_theme_assets() -> TempAppRoot {
     TempAppRoot { path: temp_root }
 }
 
+fn fission_test_root() -> TempAppRoot {
+    let source_root = GitlyWorkspace::default().unwrap().app_root().to_path_buf();
+    let temp_root = unique_temp_app_root("fission");
+    fs::create_dir_all(&temp_root).unwrap();
+    if source_root.join("theme").is_dir() {
+        copy_dir_recursive(&source_root.join("theme"), &temp_root.join("theme"));
+    }
+    fs::copy(
+        source_root.join("platform.dev.toml"),
+        temp_root.join("platform.dev.toml"),
+    )
+    .unwrap();
+    TempAppRoot { path: temp_root }
+}
+
 #[test]
 fn manifest_declares_gitly_showcase_module_and_multilingual_support() {
     let workspace = GitlyWorkspace::default().unwrap();
@@ -140,12 +157,10 @@ fn manifest_declares_gitly_showcase_module_and_multilingual_support() {
         vec!["en-GB", "fr-FR", "de-DE"]
     );
     assert!(manifest.localized_routes);
-    assert!(
-        manifest
-            .modules
-            .iter()
-            .any(|module| module.id.as_str() == "gitly-showcase")
-    );
+    assert!(manifest
+        .modules
+        .iter()
+        .any(|module| module.id.as_str() == "gitly-showcase"));
 }
 
 #[test]
@@ -177,38 +192,30 @@ fn bootstrap_registers_linked_backend_extensions_and_mock_actions_job() {
     let workspace = GitlyWorkspace::at(&temp_root.path).unwrap();
     let bootstrap = workspace.build_bootstrap("platform.dev.toml").unwrap();
 
-    assert!(
-        bootstrap
-            .linked_plugin_ids()
-            .contains(&"gitly-backend".to_string())
-    );
+    assert!(bootstrap
+        .linked_plugin_ids()
+        .contains(&"gitly-backend".to_string()));
     assert_eq!(bootstrap.runtime_plan.runtime.installed_extensions.len(), 2);
-    assert!(
-        bootstrap
-            .runtime_plan
-            .runtime
-            .registered_runtime_jobs
-            .iter()
-            .any(|job| job.contract.name == "github.actions.refresh")
-    );
-    assert!(
-        bootstrap
-            .runtime_plan
-            .runtime
-            .http
-            .routes
-            .iter()
-            .any(|route| route.path == "/api/github/repository")
-    );
-    assert!(
-        bootstrap
-            .runtime_plan
-            .runtime
-            .http
-            .routes
-            .iter()
-            .any(|route| route.path == "/fr/forgeflow/platform-ui")
-    );
+    assert!(bootstrap
+        .runtime_plan
+        .runtime
+        .registered_runtime_jobs
+        .iter()
+        .any(|job| job.contract.name == "github.actions.refresh"));
+    assert!(bootstrap
+        .runtime_plan
+        .runtime
+        .http
+        .routes
+        .iter()
+        .any(|route| route.path == "/api/github/repository"));
+    assert!(bootstrap
+        .runtime_plan
+        .runtime
+        .http
+        .routes
+        .iter()
+        .any(|route| route.path == "/fr/forgeflow/platform-ui"));
 }
 
 #[test]
@@ -549,4 +556,114 @@ fn server_exposes_runtime_derived_scheduler_state_on_gitly_actions_surface() {
         "{actions_body}"
     );
     assert!(actions_body.contains("Loading..."), "{actions_body}");
+}
+
+#[test]
+fn fission_server_preserves_gitly_pages_locales_apis_and_search_island() {
+    use coil::fission::server::{ServerRenderer, ServerRequest};
+
+    let temp_root = fission_test_root();
+    let config =
+        coil_config::PlatformConfig::from_file(temp_root.path.join("platform.dev.toml")).unwrap();
+    let app = gitly_server_app(&temp_root.path, &config, fission_server_model()).unwrap();
+    let renderer = ServerRenderer::new(app);
+
+    let mut repository = ServerRequest::get("/fr/forgeflow/platform-ui");
+    repository
+        .headers
+        .insert("host".into(), "gitly.localhost:58080".into());
+    let repository = renderer.handle(repository).unwrap();
+    let repository_body = repository.body_string();
+    assert_eq!(repository.status, 200);
+    assert!(
+        repository_body.contains("forgeflow/platform-ui"),
+        "{repository_body}"
+    );
+    assert!(repository_body.contains("LISEZ-MOI"), "{repository_body}");
+    assert!(
+        repository_body.contains("Demandes de fusion"),
+        "{repository_body}"
+    );
+    assert!(
+        repository_body.contains("lang=\"fr-FR\""),
+        "{repository_body}"
+    );
+    assert!(
+        repository_body.contains("<title>forgeflow/platform-ui | Gitly</title>"),
+        "{repository_body}"
+    );
+
+    let mut search = ServerRequest::get("/de/search");
+    search.query.insert("q".into(), "platform".into());
+    search
+        .headers
+        .insert("host".into(), "gitly.localhost".into());
+    let search = renderer.handle(search).unwrap();
+    let search_body = search.body_string();
+    assert_eq!(search.status, 200);
+    assert!(
+        search_body.contains("Suchanfrage: platform"),
+        "{search_body}"
+    );
+    assert!(search_body.contains("lang=\"de-DE\""), "{search_body}");
+    assert!(
+        search_body.contains("<title>Suche | Gitly</title>"),
+        "{search_body}"
+    );
+    assert!(search_body.contains("gitly-search.wasm"), "{search_body}");
+
+    let mut api = ServerRequest::get("/api/github/workflows");
+    api.headers.insert("host".into(), "gitly.localhost".into());
+    let api = renderer.handle(api).unwrap();
+    let api_body = api.body_string();
+    assert_eq!(api.status, 200);
+    assert!(api_body.contains("github.actions.refresh"), "{api_body}");
+    assert!(api_body.contains("gitly-actions-scheduler"), "{api_body}");
+
+    let mut hostile = ServerRequest::get("/api/github/repository");
+    hostile
+        .headers
+        .insert("host".into(), "attacker.example".into());
+    let error = renderer.handle(hostile).unwrap_err().to_string();
+    assert!(error.contains("scope resolution failed"), "{error}");
+}
+
+#[test]
+fn fission_server_inventory_replaces_the_template_router_surface() {
+    let temp_root = fission_test_root();
+    let config =
+        coil_config::PlatformConfig::from_file(temp_root.path.join("platform.dev.toml")).unwrap();
+    let app = gitly_server_app(&temp_root.path, &config, fission_server_model()).unwrap();
+    let routes = coil::fission::server::ServerRenderer::new(app).routes();
+
+    assert_eq!(routes.len(), 27);
+    assert!(routes.iter().all(|route| matches!(
+        route.mode,
+        coil::fission::server::WebRouteMode::Revalidated(_)
+    )));
+    assert_eq!(
+        routes
+            .iter()
+            .filter(|route| route.path.ends_with("/search"))
+            .map(|route| route.islands.len())
+            .sum::<usize>(),
+        3
+    );
+}
+
+fn fission_server_model() -> GitlyServerModel {
+    GitlyServerModel::from_workflow_api(BTreeMap::from([
+        (
+            "scheduler_contract".to_string(),
+            "github.actions.refresh".to_string(),
+        ),
+        (
+            "scheduler_extension".to_string(),
+            "gitly-actions-scheduler".to_string(),
+        ),
+        (
+            "scheduler_handler".to_string(),
+            "nightly-refresh".to_string(),
+        ),
+    ]))
 }

@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
 mod extensions;
+pub mod fission_app;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use coil::official_module;
 use coil_app::{
     CustomerAppComposition, CustomerAppManifest, CustomerAppRuntimePlan, MigrationPlanEntry,
@@ -38,9 +40,11 @@ pub struct GitlyWorkspace {
 pub struct GitlyBootstrap {
     pub app_root: PathBuf,
     pub config_path: PathBuf,
+    pub config: PlatformConfig,
     pub manifest: CustomerAppManifest,
     pub composition: CustomerAppComposition,
     pub runtime_plan: CustomerAppRuntimePlan,
+    pub server_model: fission_app::GitlyServerModel,
 }
 
 #[derive(Debug, Clone)]
@@ -232,13 +236,17 @@ impl GitlyWorkspace {
             .context("Gitly runtime build failed")?;
         augment_runtime_plan(&mut runtime_plan.runtime)?;
         let composition = runtime_plan.composition.clone();
+        let server_model = gitly_server_model(&runtime_plan.runtime);
+        let config = runtime_plan.runtime.config.clone();
 
         Ok(GitlyBootstrap {
             app_root: self.app_root.clone(),
             config_path,
+            config,
             manifest,
             composition,
             runtime_plan,
+            server_model,
         })
     }
 
@@ -476,11 +484,20 @@ impl GitlyBootstrap {
     }
 
     pub fn serve_from_env(&self, bind_override: Option<String>) -> Result<()> {
-        self.runtime_plan
-            .runtime
-            .clone()
-            .serve_from_env(bind_override)
-            .context("failed to serve Gitly from the customer runtime")
+        let bind = bind_override.unwrap_or_else(|| self.config.server.bind.clone());
+        let address = bind
+            .parse::<SocketAddr>()
+            .with_context(|| format!("invalid Gitly bind address `{bind}`"))?;
+        let app =
+            fission_app::gitly_server_app(&self.app_root, &self.config, self.server_model.clone())?;
+        coil::fission::server::serve(
+            coil::fission::server::ServerRenderer::new(app),
+            coil::fission::server::ServeOptions {
+                host: address.ip().to_string(),
+                port: address.port(),
+            },
+        )
+        .context("failed to serve Gitly with Fission SSR")
     }
 
     fn manual_customer_migration_entries(&self) -> Vec<MigrationPlanEntry> {
@@ -492,6 +509,10 @@ impl GitlyBootstrap {
             .cloned()
             .collect()
     }
+}
+
+fn gitly_server_model(runtime: &RuntimePlan) -> fission_app::GitlyServerModel {
+    fission_app::GitlyServerModel::from_workflow_api(workflow_api_payload(runtime))
 }
 
 pub fn default_cookie_secret(environment: Environment) -> Option<&'static str> {

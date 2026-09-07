@@ -88,6 +88,7 @@ pub struct CartRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AddCartItemRequest {
+    pub scope: CoilRequestScope,
     pub product_handle: String,
     pub quantity: u32,
 }

@@ -1,12 +1,14 @@
 use coil::CoilRequestScope;
+use coil::fission::server::ServerJobRegistry;
 use coil_config::SiteConfig;
 use coil_data::{DataModelError, DataRuntime, PostgresDataClient};
 use coil_runtime::StorefrontCatalog;
 use shoppr_fission::{
-    CartLine, CartSnapshot, CatalogCollection, CatalogProduct, CatalogRequest, CatalogResponse,
-    ShopprJobError,
+    ADD_CART_ITEM_JOB, CART_READ_JOB, CATALOG_JOB, CartLine, CartSnapshot, CatalogCollection,
+    CatalogProduct, CatalogRequest, CatalogResponse, ShopprJobError,
 };
 use sqlx::Row;
+use std::future::Future;
 
 #[derive(Clone)]
 pub struct PostgresCatalogRepository {
@@ -422,6 +424,41 @@ impl PostgresCatalogRepository {
     }
 }
 
+pub fn postgres_server_jobs(data: &DataRuntime) -> Result<ServerJobRegistry, DataModelError> {
+    let repository = PostgresCatalogRepository::connect(data)?;
+    let catalog_repository = repository.clone();
+    let cart_repository = repository.clone();
+    let cart_mutation_repository = repository;
+    Ok(ServerJobRegistry::new()
+        .register_job(CATALOG_JOB, move |request, _ctx| {
+            await_database(catalog_repository.load(request))
+        })
+        .register_job(CART_READ_JOB, move |request, _ctx| {
+            await_database(cart_repository.load_cart(&request.scope))
+        })
+        .register_job(ADD_CART_ITEM_JOB, move |request, _ctx| {
+            await_database(cart_mutation_repository.add_to_cart(
+                &request.scope,
+                &request.product_handle,
+                request.quantity,
+            ))
+        }))
+}
+
+fn await_database<F, T>(future: F) -> Result<T, ShopprJobError>
+where
+    F: Future<Output = Result<T, ShopprJobError>>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(database_error)?
+            .block_on(future),
+    }
+}
+
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
@@ -441,7 +478,10 @@ fn unix_timestamp() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::database_error;
+    use super::{await_database, database_error, postgres_server_jobs};
+    use coil_data::{ConnectionPoolProfile, DataRuntime};
+    use shoppr_fission::{ADD_CART_ITEM_JOB, CART_READ_JOB, CATALOG_JOB, ShopprJobError};
+    use std::time::Duration;
 
     #[test]
     fn database_failures_do_not_cross_the_public_job_boundary() {
@@ -450,5 +490,42 @@ mod tests {
         assert_eq!(error.code, "catalog_unavailable");
         assert_eq!(error.message, "Shoppr data is temporarily unavailable");
         assert!(!error.message.contains("private_inventory_snapshot"));
+    }
+
+    #[test]
+    fn postgres_jobs_register_the_live_catalogue_and_cart_reads() {
+        let data = DataRuntime {
+            driver: coil_config::DatabaseDriver::Postgres,
+            connection_secret_ref: None,
+            connection_secret: Some("postgres://shoppr:shoppr@127.0.0.1/shoppr".to_string()),
+            schema: "public".to_string(),
+            migrations_table: "_coil_migrations".to_string(),
+            pool: ConnectionPoolProfile {
+                min_connections: 1,
+                max_connections: 1,
+                statement_timeout: Duration::from_secs(1),
+            },
+        };
+
+        let jobs = postgres_server_jobs(&data).expect("lazy PostgreSQL jobs should register");
+
+        assert!(jobs.has_job(CATALOG_JOB.name));
+        assert!(jobs.has_job(CART_READ_JOB.name));
+        assert!(jobs.has_job(ADD_CART_ITEM_JOB.name));
+    }
+
+    #[test]
+    fn database_jobs_are_awaited_from_the_fission_server_runtime() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let value = runtime
+            .block_on(async { await_database(async { Ok::<_, ShopprJobError>(42) }) })
+            .unwrap();
+
+        assert_eq!(value, 42);
     }
 }

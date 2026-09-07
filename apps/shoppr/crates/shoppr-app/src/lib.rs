@@ -315,6 +315,13 @@ fn discover_workspace_root(start: Option<&Path>) -> Option<PathBuf> {
 }
 
 impl ShopprBootstrap {
+    pub fn fission_server_app(&self) -> Result<coil::fission::server::FissionServerApp> {
+        let jobs = fission_app::postgres_server_jobs(&self.runtime_plan.runtime.data)
+            .context("failed to register Shoppr's PostgreSQL Fission jobs")?;
+        fission_app::shoppr_server_app(&self.app_root, &self.runtime_plan.runtime.config, jobs)
+            .context("failed to build Shoppr's Fission server app")
+    }
+
     pub fn server_host<R: SecretResolver>(
         &self,
         resolver: &R,

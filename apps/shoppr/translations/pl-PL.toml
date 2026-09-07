@@ -103,6 +103,22 @@ explore = "Eksploruj"
 inspect = "Usługi"
 platform = "Regulamin"
 
+[fission]
+catalog_unavailable = "Aktualna kolekcja jest tymczasowo niedostępna"
+catalog_loading = "Przygotowujemy aktualną kolekcję"
+home_intro = "Naturalne faktury, czyste linie i rzeczy wybrane tak, by zostały z Tobą na długo."
+catalog_intro = "Pełna aktualna kolekcja wybrana dla naszych flagowych lokalizacji."
+current_edit = "SHOPPR / AKTUALNA KOLEKCJA"
+ask_availability = "Zapytaj zespół Townhouse o aktualną dostępność"
+view_piece = "Zobacz produkt"
+search_edit = "Przeszukaj tę kolekcję"
+bag_ready = "Twój koszyk jest gotowy"
+choose_session = "Wybierz termin"
+account_title = "Twoje konto Shoppr"
+admin_title = "Operacje Shoppr"
+not_found_title = "Tej strony nie ma w aktualnej kolekcji"
+not_found_return = "Wróć do Shoppr"
+
 [product.meta]
 title = "Karta produktu"
 

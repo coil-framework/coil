@@ -103,6 +103,22 @@ explore = "Explore"
 inspect = "Services"
 platform = "Legal"
 
+[fission]
+catalog_unavailable = "The edit is temporarily unavailable"
+catalog_loading = "Preparing the current edit"
+home_intro = "Natural texture, clean structure, and pieces selected to live with you."
+catalog_intro = "The complete current edit, selected across our flagship locations."
+current_edit = "SHOPPR / CURRENT EDIT"
+ask_availability = "Ask the Townhouse team for current availability"
+view_piece = "View piece"
+search_edit = "Search this edit"
+bag_ready = "Your bag is ready"
+choose_session = "Choose a session"
+account_title = "Your Shoppr account"
+admin_title = "Shoppr operations"
+not_found_title = "This page is not in the current edit"
+not_found_return = "Return to Shoppr"
+
 [product.meta]
 title = "Product detail"
 

@@ -103,6 +103,22 @@ explore = "Explorer"
 inspect = "Services"
 platform = "Mentions Légales"
 
+[fission]
+catalog_unavailable = "La sélection est temporairement indisponible"
+catalog_loading = "Préparation de la sélection en cours"
+home_intro = "Des textures naturelles, des lignes nettes et des pièces choisies pour vous accompagner."
+catalog_intro = "Toute la sélection actuelle, choisie dans nos adresses phares."
+current_edit = "SHOPPR / SÉLECTION ACTUELLE"
+ask_availability = "Demandez à l’équipe Townhouse les disponibilités actuelles"
+view_piece = "Voir la pièce"
+search_edit = "Rechercher dans cette sélection"
+bag_ready = "Votre panier est prêt"
+choose_session = "Choisir une séance"
+account_title = "Votre compte Shoppr"
+admin_title = "Opérations Shoppr"
+not_found_title = "Cette page ne fait pas partie de la sélection actuelle"
+not_found_return = "Retourner à Shoppr"
+
 [product.meta]
 title = "Détail du produit"
 

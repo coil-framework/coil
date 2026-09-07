@@ -15,6 +15,7 @@ web = ["site", "coil/web"]
 
 [dependencies]
 coil = { package = "coil-fission", version = "0.1.1", path = "../../../../crates/coil-fission", default-features = false }
+fission.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

@@ -22,6 +22,7 @@ serde_json = "1"
 sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio-rustls"] }
 shoppr-fission = { path = "crates/shoppr-fission", default-features = false }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+fission = { version = "0.14.1", path = "../../../../fission/fission/crates/authoring/fission", default-features = false }
 coil-admin = { version = "0.1.1", path = "../../crates/coil-admin" }
 coil = { package = "coil-rs", version = "0.1.1", path = "../../crates/coil", default-features = false }
 coil-app = { version = "0.1.1", path = "../../crates/coil-app" }

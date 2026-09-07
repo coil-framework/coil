@@ -1,0 +1,23 @@
+[package]
+name = "gitly-fission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["site"]
+site = ["coil/site"]
+
+[dependencies]
+coil = { package = "coil-fission", path = "../../../../crates/coil-fission", default-features = false }
+fission.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"

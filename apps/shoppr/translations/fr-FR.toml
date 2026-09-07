@@ -199,6 +199,12 @@ delivery_label = "Livraison Estimée"
 total_label = "Total"
 checkout_button = "Passer la commande"
 continue_shopping = "Continuer les achats"
+empty_title = "Votre panier est vide."
+empty_summary = "Explorez la sélection actuelle et choisissez une pièce pour continuer."
+empty_cta = "Découvrir la sélection"
+error_title = "Votre panier est indisponible"
+added_singular = "pièce dans votre panier"
+added_plural = "pièces dans votre panier"
 
 [account]
 meta_title = "Mon Compte"

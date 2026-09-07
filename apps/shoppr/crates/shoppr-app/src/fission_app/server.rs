@@ -1,10 +1,11 @@
 use super::{ShopprState, StorefrontPage, StorefrontRoute};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use coil::fission::i18n::TranslationBundle;
 use coil::fission::server::{
-    FissionServerApp, ServerJobRegistry, ServerRenderContext, WasmIsland, WebRouteMode,
+    FissionServerApp, ServerJobRegistry, ServerPrivatePolicy, ServerRenderContext,
+    ServerRenderPolicy, WasmIsland, WebRouteMode,
 };
-use coil::{public_revalidation, SiteDefinition, SiteRegistry};
+use coil::{SiteDefinition, SiteRegistry, public_revalidation};
 use coil_config::{Environment, PlatformConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -78,16 +79,6 @@ pub fn shoppr_server_app(
                 "Filter the current server-rendered catalogue without taking over the page.",
             ),
         )
-        .island(
-            "/:locale/shop",
-            WasmIsland::new(
-                "shoppr-cart",
-                "/fission/islands/shoppr-cart.wasm",
-                "shoppr-cart",
-            )
-            .entry("shoppr_fission::cart_island_boot")
-            .description("Session cart editing and totals inside the catalogue page."),
-        )
         .route_widget_with_state(
             "/:locale/shop/collections",
             "Seasonal edits | Shoppr",
@@ -111,19 +102,9 @@ pub fn shoppr_server_app(
             "/:locale/shop/products/:handle",
             "Product | Shoppr",
             Some("Shoppr product detail.".to_string()),
-            public(),
+            WebRouteMode::Server(ServerRenderPolicy::default()),
             StorefrontPage,
             state_loader(Arc::clone(&sites), StorefrontRoute::Product(String::new())),
-        )
-        .island(
-            "/:locale/shop/products/:handle",
-            WasmIsland::new(
-                "shoppr-cart",
-                "/fission/islands/shoppr-cart.wasm",
-                "shoppr-cart",
-            )
-            .entry("shoppr_fission::cart_island_boot")
-            .description("Add the selected variant to the durable session cart."),
         )
         .route_widget_with_state(
             "/:locale/events",
@@ -142,6 +123,14 @@ pub fn shoppr_server_app(
             )
             .entry("shoppr_fission::booking_island_boot")
             .description("Select and reserve an event session."),
+        )
+        .route_widget_with_state(
+            "/cart",
+            "Your bag | Shoppr",
+            Some("Your current Shoppr selection.".to_string()),
+            WebRouteMode::ServerPrivate(ServerPrivatePolicy::default()),
+            StorefrontPage,
+            state_loader(Arc::clone(&sites), StorefrontRoute::Cart),
         );
     for (locale, source) in [
         ("en-GB", include_str!("../../../../translations/en-GB.toml")),

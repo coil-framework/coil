@@ -1,7 +1,11 @@
-use super::model::{CatalogProduct, CatalogRequest, CatalogResponse, CATALOG_JOB};
+use super::model::{
+    CART_READ_JOB, CATALOG_JOB, CartRequest, CartSnapshot, CatalogProduct, CatalogRequest,
+    CatalogResponse,
+};
 use super::state::{
-    on_catalog_failed, on_catalog_loaded, CatalogFailed, CatalogLoaded, ShopprState,
-    StorefrontRoute,
+    AddCartItem, CartFailed, CartLoaded, CatalogFailed, CatalogLoaded, ShopprState,
+    StorefrontRoute, add_cart_item, on_cart_failed, on_cart_loaded, on_catalog_failed,
+    on_catalog_loaded,
 };
 use coil::fission::core::{JobResource, ResourceKey};
 use coil::fission::prelude::*;
@@ -14,6 +18,8 @@ impl From<StorefrontPage> for Widget {
         let (ctx, view) = coil::fission::build::current::<ShopprState>();
         let loaded = with_reducer!(ctx, CatalogLoaded, on_catalog_loaded);
         let failed = with_reducer!(ctx, CatalogFailed, on_catalog_failed);
+        let cart_loaded = with_reducer!(ctx, CartLoaded, on_cart_loaded);
+        let cart_failed = with_reducer!(ctx, CartFailed, on_cart_failed);
         let state = view.state();
         let env = view.env();
         let request = CatalogRequest {
@@ -36,6 +42,23 @@ impl From<StorefrontPage> for Widget {
                 .on_ok(loaded)
                 .on_err(failed),
             );
+            if matches!(&state.route, StorefrontRoute::Cart) {
+                resources.job(
+                    JobResource::new(
+                        ResourceKey::new(format!(
+                            "shoppr.cart.{}.{}",
+                            state.scope.site_id, state.scope.session_id
+                        )),
+                        CART_READ_JOB,
+                        CartRequest {
+                            scope: state.scope.clone(),
+                        },
+                    )
+                    .deps((state.scope.site_id.clone(), state.scope.session_id.clone()))
+                    .on_ok(cart_loaded)
+                    .on_err(cart_failed),
+                );
+            }
         });
 
         let tokens = &view.env().theme.tokens;
@@ -90,6 +113,7 @@ fn desktop_site_header(locale: &str, env: &Env) -> Widget {
                         format!("/{locale}/events"),
                     )
                     .into(),
+                    Link::to(t(env, "fission.bag_ready", "Your bag"), "/cart").into(),
                 ],
                 ..Default::default()
             }
@@ -124,6 +148,7 @@ fn mobile_site_header(locale: &str, env: &Env) -> Widget {
                         format!("/{locale}/events"),
                     )
                     .into(),
+                    Link::to(t(env, "fission.bag_ready", "Bag"), "/cart").into(),
                 ],
                 ..Default::default()
             }
@@ -149,6 +174,7 @@ fn route_content(state: &ShopprState, env: &Env) -> Widget {
             }
             StorefrontRoute::Product(handle) => product_page(catalog, handle, env),
             StorefrontRoute::Events => events_page(env),
+            StorefrontRoute::Cart => cart_page(&state.cart, env),
             StorefrontRoute::Account => account_page(env),
             StorefrontRoute::Admin => admin_entry_page(env),
             StorefrontRoute::NotFound => not_found(env),
@@ -249,7 +275,6 @@ fn catalog_page(catalog: &CatalogResponse, locale: &str, env: &Env) -> Widget {
             .into(),
             search_island_mount(env),
             product_grid(&catalog.products, locale, env),
-            cart_island_mount(env),
         ],
         ..Default::default()
     }
@@ -324,9 +349,13 @@ fn collection_page(catalog: &CatalogResponse, handle: &str, locale: &str, env: &
 
 fn product_page(catalog: &CatalogResponse, handle: &str, env: &Env) -> Widget {
     match catalog.products.iter().find(|item| item.handle == handle) {
-        Some(product) => Column {
-            gap: Some(22.0),
-            children: vec![
+        Some(product) => {
+            let (ctx, view) = coil::fission::build::current::<ShopprState>();
+            let add = ctx.bind(
+                AddCartItem(product.handle.clone()),
+                reduce_with!(add_cart_item),
+            );
+            let mut children = vec![
                 Text::new(t(env, "fission.current_edit", "SHOPPR / CURRENT EDIT"))
                     .weight(700)
                     .into(),
@@ -364,11 +393,37 @@ fn product_page(catalog: &CatalogResponse, handle: &str, env: &Env) -> Widget {
                     product.inventory_locations.join(" · ")
                 })
                 .into(),
-                cart_island_mount(env),
-            ],
-            ..Default::default()
+                Button {
+                    id: Some(WidgetId::explicit("shoppr.cart.add")),
+                    child: Some(Text::new(t(env, "product.copy.add_to_cart", "Add to bag")).into()),
+                    on_press: Some(add),
+                    ..Default::default()
+                }
+                .semantics_identifier("shoppr.cart.add")
+                .into(),
+            ];
+            if let Some(cart) = &view.state().cart.data {
+                let summary = if cart.item_count == 1 {
+                    t(env, "cart.added_singular", "piece now in your bag")
+                } else {
+                    t(env, "cart.added_plural", "pieces now in your bag")
+                };
+                children.push(
+                    Text::new(format!("{} {summary}", cart.item_count))
+                        .weight(700)
+                        .into(),
+                );
+            }
+            if let Some(error) = &view.state().cart.error {
+                children.push(Text::new(error.message.clone()).into());
+            }
+            Column {
+                gap: Some(22.0),
+                children,
+                ..Default::default()
+            }
+            .into()
         }
-        .into(),
         None => not_found(env),
     }
 }
@@ -418,14 +473,80 @@ fn search_island_mount(env: &Env) -> Widget {
     .into()
 }
 
-fn cart_island_mount(env: &Env) -> Widget {
-    SemanticsRegion {
-        id: Some(WidgetId::explicit("shoppr-cart")),
-        identifier: Some("shoppr-cart".to_string()),
-        child: Some(Text::new(t(env, "fission.bag_ready", "Your bag is ready")).into()),
-        ..Default::default()
+fn cart_page(
+    cart: &AsyncSnapshot<CartSnapshot, super::model::ShopprJobError>,
+    env: &Env,
+) -> Widget {
+    match cart {
+        AsyncSnapshot {
+            data: Some(cart), ..
+        } if cart.lines.is_empty() => EmptyState {
+            icon: None,
+            title: t(env, "cart.empty_title", "Your bag is empty"),
+            description: Some(t(
+                env,
+                "cart.empty_summary",
+                "Explore the current edit and choose a piece to continue.",
+            )),
+            action: Some(Link::to(t(env, "cart.empty_cta", "Explore the edit"), "/").into()),
+        }
+        .into(),
+        AsyncSnapshot {
+            data: Some(cart), ..
+        } => Column {
+            gap: Some(20.0),
+            children: std::iter::once(
+                Text::new(t(env, "cart.title", "Your bag"))
+                    .size(48.0)
+                    .weight(700)
+                    .into(),
+            )
+            .chain(cart.lines.iter().map(|line| {
+                Row {
+                    gap: Some(20.0),
+                    children: vec![
+                        Text::new(line.title.clone()).size(22.0).weight(700).into(),
+                        Spacer {
+                            flex_grow: 1.0,
+                            ..Default::default()
+                        }
+                        .into(),
+                        Text::new(format!("{} × {}", line.quantity, line.currency)).into(),
+                        Text::new(format!("{:.2}", line.total_minor as f64 / 100.0)).into(),
+                    ],
+                    ..Default::default()
+                }
+                .into()
+            }))
+            .chain(std::iter::once(
+                Text::new(format!(
+                    "{} {:.2}",
+                    cart.currency,
+                    cart.subtotal_minor as f64 / 100.0
+                ))
+                .size(30.0)
+                .weight(700)
+                .into(),
+            ))
+            .collect(),
+            ..Default::default()
+        }
+        .into(),
+        AsyncSnapshot {
+            error: Some(error), ..
+        } => Alert {
+            kind: AlertKind::Error,
+            title: t(env, "cart.error_title", "Your bag is unavailable"),
+            description: Some(error.message.clone()),
+        }
+        .into(),
+        _ => Spinner {
+            id: WidgetId::explicit("shoppr.cart.loading"),
+            color: None,
+            motion: Some(SpinnerMotion::Default),
+        }
+        .into(),
     }
-    .into()
 }
 
 fn events_page(env: &Env) -> Widget {

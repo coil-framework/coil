@@ -199,6 +199,12 @@ delivery_label = "Szacowana Dostawa"
 total_label = "Łącznie"
 checkout_button = "Przejdź do kasy"
 continue_shopping = "Kontynuuj zakupy"
+empty_title = "Twój koszyk jest pusty."
+empty_summary = "Poznaj aktualną kolekcję i wybierz produkt, aby kontynuować."
+empty_cta = "Poznaj kolekcję"
+error_title = "Twój koszyk jest niedostępny"
+added_singular = "produkt w Twoim koszyku"
+added_plural = "produkty w Twoim koszyku"
 
 [account]
 meta_title = "Moje Konto"

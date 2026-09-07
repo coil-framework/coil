@@ -199,6 +199,12 @@ delivery_label = "Estimated Delivery"
 total_label = "Total"
 checkout_button = "Proceed to checkout"
 continue_shopping = "Continue shopping"
+empty_title = "Your bag is empty."
+empty_summary = "Explore the current edit and choose a piece to continue."
+empty_cta = "Explore the edit"
+error_title = "Your bag is unavailable"
+added_singular = "piece now in your bag"
+added_plural = "pieces now in your bag"
 
 [account]
 meta_title = "My Account"

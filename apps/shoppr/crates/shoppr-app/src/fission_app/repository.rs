@@ -1,8 +1,10 @@
+use coil::CoilRequestScope;
 use coil_config::SiteConfig;
 use coil_data::{DataModelError, DataRuntime, PostgresDataClient};
 use coil_runtime::StorefrontCatalog;
 use shoppr_fission::{
-    CatalogCollection, CatalogProduct, CatalogRequest, CatalogResponse, ShopprJobError,
+    CartLine, CartSnapshot, CatalogCollection, CatalogProduct, CatalogRequest, CatalogResponse,
+    ShopprJobError,
 };
 use sqlx::Row;
 
@@ -249,14 +251,183 @@ impl PostgresCatalogRepository {
         transaction.commit().await.map_err(database_error)?;
         Ok(())
     }
+
+    pub async fn load_cart(
+        &self,
+        scope: &CoilRequestScope,
+    ) -> Result<CartSnapshot, ShopprJobError> {
+        let rows = sqlx::query(&format!(
+            r#"
+            SELECT
+                line.product_id,
+                product.slug AS product_handle,
+                line.title,
+                line.quantity,
+                line.unit_price_minor,
+                line.currency
+            FROM {schema}.commerce_cart_lines AS line
+            JOIN {schema}.commerce_catalog_products AS product
+              ON product.id = line.product_id
+            WHERE line.site_id = $1 AND line.session_id = $2
+            ORDER BY line.updated_at, line.product_id
+            "#,
+            schema = self.schema,
+        ))
+        .bind(&scope.site_id)
+        .bind(&scope.session_id)
+        .fetch_all(&self.client.pool)
+        .await
+        .map_err(database_error)?;
+
+        let mut snapshot = CartSnapshot::default();
+        for row in rows {
+            let quantity_i64: i64 = row.try_get("quantity").map_err(database_error)?;
+            let quantity = u32::try_from(quantity_i64).map_err(|_| {
+                ShopprJobError::unavailable("stored cart quantity is outside the supported range")
+            })?;
+            let unit_price_minor: i64 = row.try_get("unit_price_minor").map_err(database_error)?;
+            let total_minor = unit_price_minor
+                .checked_mul(i64::from(quantity))
+                .ok_or_else(|| {
+                    ShopprJobError::unavailable("stored cart total exceeds the supported range")
+                })?;
+            let currency: String = row.try_get("currency").map_err(database_error)?;
+            if snapshot.currency.is_empty() {
+                snapshot.currency.clone_from(&currency);
+            } else if snapshot.currency != currency {
+                return Err(ShopprJobError::unavailable(
+                    "stored cart contains conflicting currencies",
+                ));
+            }
+            snapshot.item_count = snapshot.item_count.checked_add(quantity).ok_or_else(|| {
+                ShopprJobError::unavailable("stored cart item count exceeds the supported range")
+            })?;
+            snapshot.subtotal_minor = snapshot
+                .subtotal_minor
+                .checked_add(total_minor)
+                .ok_or_else(|| {
+                    ShopprJobError::unavailable("stored cart subtotal exceeds the supported range")
+                })?;
+            snapshot.lines.push(CartLine {
+                product_id: row.try_get("product_id").map_err(database_error)?,
+                product_handle: row.try_get("product_handle").map_err(database_error)?,
+                title: row.try_get("title").map_err(database_error)?,
+                quantity,
+                unit_price_minor,
+                total_minor,
+                currency,
+            });
+        }
+        Ok(snapshot)
+    }
+
+    /// Atomically adds one published product to a trusted request's session cart.
+    ///
+    /// `scope` must be derived from the server request. Browser-supplied site or
+    /// session identifiers are never accepted by this operation.
+    pub async fn add_to_cart(
+        &self,
+        scope: &CoilRequestScope,
+        product_handle: &str,
+        quantity: u32,
+    ) -> Result<CartSnapshot, ShopprJobError> {
+        if !(1..=99).contains(&quantity) {
+            return Err(ShopprJobError::invalid(
+                "invalid_quantity",
+                "quantity must be between 1 and 99",
+            ));
+        }
+        if scope.session_id.trim().is_empty() {
+            return Err(ShopprJobError::invalid(
+                "missing_session",
+                "a server-established session is required",
+            ));
+        }
+
+        let mut transaction = self.client.pool.begin().await.map_err(database_error)?;
+        let product = sqlx::query(&format!(
+            r#"
+            SELECT product.id, product.title, product.price_minor, product.currency
+            FROM {schema}.commerce_catalog_products AS product
+            JOIN {schema}.commerce_product_publications AS publication
+              ON publication.product_id = product.id
+            WHERE product.slug = $1
+              AND product.status = 'active'
+              AND publication.site_id = $2
+              AND publication.locale = $3
+              AND publication.is_published
+            FOR SHARE OF product, publication
+            "#,
+            schema = self.schema,
+        ))
+        .bind(product_handle)
+        .bind(&scope.site_id)
+        .bind(&scope.locale)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            ShopprJobError::invalid(
+                "product_unavailable",
+                "the selected product is not published for this site and locale",
+            )
+        })?;
+        let product_id: String = product.try_get("id").map_err(database_error)?;
+        let title: String = product.try_get("title").map_err(database_error)?;
+        let unit_price_minor: i64 = product.try_get("price_minor").map_err(database_error)?;
+        let currency: String = product.try_get("currency").map_err(database_error)?;
+        let now = unix_timestamp();
+
+        let cart_currency: String = sqlx::query_scalar(&format!(
+            "INSERT INTO {schema}.commerce_carts (site_id, session_id, principal_id, status, currency, updated_at) VALUES ($1, $2, NULL, 'active', $3, $4) ON CONFLICT (site_id, session_id) DO UPDATE SET updated_at = EXCLUDED.updated_at RETURNING currency",
+            schema = self.schema,
+        ))
+        .bind(&scope.site_id)
+        .bind(&scope.session_id)
+        .bind(&currency)
+        .bind(now)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(database_error)?;
+        if cart_currency != currency {
+            return Err(ShopprJobError::invalid(
+                "currency_conflict",
+                "the selected product uses a different currency from this cart",
+            ));
+        }
+
+        let outcome = sqlx::query(&format!(
+            "INSERT INTO {schema}.commerce_cart_lines AS current_line (site_id, session_id, product_id, title, quantity, unit_price_minor, currency, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (site_id, session_id, product_id) DO UPDATE SET title = EXCLUDED.title, quantity = current_line.quantity + EXCLUDED.quantity, unit_price_minor = EXCLUDED.unit_price_minor, currency = EXCLUDED.currency, updated_at = EXCLUDED.updated_at WHERE current_line.quantity + EXCLUDED.quantity <= 999",
+            schema = self.schema,
+        ))
+        .bind(&scope.site_id)
+        .bind(&scope.session_id)
+        .bind(&product_id)
+        .bind(&title)
+        .bind(i64::from(quantity))
+        .bind(unit_price_minor)
+        .bind(&currency)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(database_error)?;
+        if outcome.rows_affected() != 1 {
+            return Err(ShopprJobError::invalid(
+                "cart_limit_exceeded",
+                "the cart cannot contain more than 999 of one product",
+            ));
+        }
+        transaction.commit().await.map_err(database_error)?;
+        self.load_cart(scope).await
+    }
 }
 
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
-fn database_error(error: impl std::fmt::Display) -> ShopprJobError {
-    ShopprJobError::unavailable(error.to_string())
+fn database_error(_error: impl std::fmt::Display) -> ShopprJobError {
+    ShopprJobError::unavailable("Shoppr data is temporarily unavailable")
 }
 
 fn unix_timestamp() -> i64 {
@@ -266,4 +437,18 @@ fn unix_timestamp() -> i64 {
         .as_secs()
         .try_into()
         .unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::database_error;
+
+    #[test]
+    fn database_failures_do_not_cross_the_public_job_boundary() {
+        let error = database_error("relation private_inventory_snapshot does not exist");
+
+        assert_eq!(error.code, "catalog_unavailable");
+        assert_eq!(error.message, "Shoppr data is temporarily unavailable");
+        assert!(!error.message.contains("private_inventory_snapshot"));
+    }
 }
